@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pádel — Equipos A/B | 4 canchas | 3 turnos</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    body { margin: 0; background: #0b1020; color: #eef2ff; }
+    .wrap { max-width: 1250px; margin: 0 auto; padding: 18px; }
+    h1 { margin: 6px 0 14px; font-size: 20px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr 1.1fr; gap: 14px; }
+    .card { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 14px; }
+    label { display: block; font-size: 12px; opacity: .9; margin-bottom: 6px; }
+    input, select, button, textarea {
+      width: 100%; box-sizing: border-box;
+      border-radius: 12px; border: 1px solid rgba(255,255,255,.18);
+      background: rgba(0,0,0,.25); color: #eef2ff;
+      padding: 10px 12px; outline: none;
+    }
+    textarea { min-height: 210px; resize: vertical; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .row3 { display: grid; grid-template-columns: 1.2fr .8fr .8fr; gap: 10px; }
+    .btns { display: flex; gap: 10px; flex-wrap: wrap; }
+    button { cursor: pointer; font-weight: 650; }
+    button.primary { background: #4f46e5; border-color: rgba(255,255,255,.2); }
+    button.ghost { background: transparent; }
+    .hint { font-size: 12px; opacity: .85; line-height: 1.35; }
+    .pill { display: inline-flex; gap: 8px; align-items: center; padding: 6px 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; font-size: 12px; }
+    .error { color: #fecaca; }
+    .ok { color: #bbf7d0; }
+    .muted { opacity: .8; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .list { display: grid; gap: 10px; }
+    .turn { border: 1px solid rgba(255,255,255,.14); border-radius: 14px; overflow: hidden; }
+    .turn h3 { margin: 0; padding: 10px 12px; background: rgba(255,255,255,.06); font-size: 14px; }
+    .turn .content { padding: 12px; display: grid; gap: 8px; }
+    .court { padding: 10px 12px; border-radius: 12px; background: rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.12); }
+    @media (max-width: 1050px) { .grid { grid-template-columns: 1fr; } textarea { min-height: 160px; } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Pádel: Equipos A vs B • 8 jugadores por equipo (4D/4R) • 4 canchas • 3 turnos</h1>
+
+  <div class="hint" style="margin-bottom:12px;">
+    <span class="pill"><b>Equipo A</b> y <b>Equipo B</b> se arman primero</span>
+    <span class="pill">Cada jugador: <b>Derecha (D)</b> o <b>Revés (R)</b></span>
+    <span class="pill">En cada cancha: pareja A (D+R) vs pareja B (D+R)</span>
+    <span class="pill">Opción: no repetir parejas en turnos</span>
+  </div>
+
+  <div class="grid">
+    <!-- Equipo A -->
+    <div class="card">
+      <h2 style="margin:0 0  10px;font-size:16px;">Equipo A</h2>
+
+      <div class="row3">
+        <div>
+          <label>Nombre</label>
+          <input id="nameA" placeholder="Ej: Ana" />
+        </div>
+        <div>
+          <label>Lado</label>
+          <select id="sideA">
+            <option value="D">Derecha (D)</option>
+            <option value="R">Revés (R)</option>
+          </select>
+        </div>
+        <div>
+          <label>Acción</label>
+          <button class="primary" id="addA">Agregar</button>
+        </div>
+      </div>
+
+      <div style="height:10px"></div>
+      <label>Jugadores A (8 total)</label>
+      <textarea id="boxA" readonly></textarea>
+
+      <div style="height:10px"></div>
+      <div class="btns">
+        <button class="ghost" id="clearA">Vaciar A</button>
+      </div>
+
+      <div id="statusA" class="hint"></div>
+    </div>
+
+    <!-- Equipo B -->
+    <div class="card">
+      <h2 style="margin:0 0 10px;font-size:16px;">Equipo B</h2>
+
+      <div class="row3">
+        <div>
+          <label>Nombre</label>
+          <input id="nameB" placeholder="Ej: Luis" />
+        </div>
+        <div>
+          <label>Lado</label>
+          <select id="sideB">
+            <option value="D">Derecha (D)</option>
+            <option value="R">Revés (R)</option>
+          </select>
+        </div>
+        <div>
+          <label>Acción</label>
+          <button class="primary" id="addB">Agregar</button>
+        </div>
+      </div>
+
+      <div style="height:10px"></div>
+      <label>Jugadores B (8 total)</label>
+      <textarea id="boxB" readonly></textarea>
+
+      <div style="height:10px"></div>
+      <div class="btns">
+        <button class="ghost" id="clearB">Vaciar B</button>
+      </div>
+
+      <div id="statusB" class="hint"></div>
+    </div>
+
+    <!-- Generación -->
+    <div class="card">
+      <h2 style="margin:0 0 10px;font-size:16px;">Generar turnos</h2>
+
+      <div class="row">
+        <div>
+          <label>No repetir parejas (A ni B) entre turnos</label>
+          <select id="noRepeat">
+            <option value="yes" selected>Sí</option>
+            <option value="no">No</option>
+          </select>
+        </div>
+        <div>
+          <label>Turnos</label>
+          <input value="3" readonly />
+        </div>
+      </div>
+
+      <div style="height:10px"></div>
+      <div class="btns">
+        <button class="primary" id="gen">Generar 3 turnos</button>
+        <button class="ghost" id="copy">Copiar resultado</button>
+        <button class="ghost" id="loadExample">Cargar ejemplo</button>
+        <button class="ghost" id="clearAll">Limpiar todo</button>
+      </div>
+
+      <div id="status" class="hint" style="margin-top:10px;"></div>
+
+      <div style="height:12px"></div>
+      <label>Resultado</label>
+      <div id="out" class="list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  /** @typedef {{name:string, side:'D'|'R'}} Player */
+
+  const TURNS = 3;
+  const COURTS = 4;
+  const TEAM_SIZE = 8;
+
+  const $ = (id)=>document.getElementById(id);
+
+  const nameA = $("nameA"), sideA = $("sideA"), addA = $("addA");
+  const nameB = $("nameB"), sideB = $("sideB"), addB = $("addB");
+  const boxA = $("boxA"), boxB = $("boxB");
+  const statusA = $("statusA"), statusB = $("statusB");
+  const clearA = $("clearA"), clearB = $("clearB");
+
+  const noRepeatEl = $("noRepeat");
+  const genBtn = $("gen");
+  const copyBtn = $("copy");
+  const loadExampleBtn = $("loadExample");
+  const clearAllBtn = $("clearAll");
+  const status = $("status");
+  const out = $("out");
+
+  /** @type {Player[]} */ let teamA = [];
+  /** @type {Player[]} */ let teamB = [];
+
+  function setStatus(el, msg, kind=""){
+    el.className = "hint " + (kind==="error" ? "error" : kind==="ok" ? "ok" : "");
+    el.textContent = msg;
+  }
+
+  function renderTeams(){
+    boxA.value = teamA.map((p,i)=>`${String(i+1).padStart(2,'0')}. ${p.name} | ${p.side}`).join("\n");
+    boxB.value = teamB.map((p,i)=>`${String(i+1).padStart(2,'0')}. ${p.name} | ${p.side}`).join("\n");
+  }
+
+  function clearOutput(){ out.innerHTML = ""; }
+
+  function shuffle(arr){
+    for(let i=arr.length-1;i>0;i--){
+      const j = Math.floor(Math.random()*(i+1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  function uniqueNameExists(name){
+    const n = name.toLowerCase();
+    return teamA.some(p=>p.name.toLowerCase()===n) || teamB.some(p=>p.name.toLowerCase()===n);
+  }
+
+  function countSide(list, side){
+    return list.reduce((acc,p)=>acc+(p.side===side?1:0),0);
+  }
+
+  function validateTeam(team, label){
+    if(team.length !== TEAM_SIZE) throw new Error(`${label} debe tener ${TEAM_SIZE} jugadores.`);
+    if(countSide(team,"D") !== 4 || countSide(team,"R") !== 4){
+      throw new Error(`${label} debe tener 4 Derecha (D) y 4 Revés (R).`);
+    }
+  }
+
+  function pairKey(a,b){ return [a.name,b.name].sort().join("||"); }
+  function formatPlayer(p){ return `${p.name}(${p.side})`; }
+  function formatPair(pair){ return `${formatPlayer(pair[0])} + ${formatPlayer(pair[1])}`; }
+
+  // Backtracking para emparejar D+R dentro del equipo evitando parejas usadas
+  function buildPairs(teamPlayers, usedPairs){
+    const rights = shuffle(teamPlayers.filter(p=>p.side==="D").slice());
+    const lefts  = teamPlayers.filter(p=>p.side==="R").slice();
+    if(rights.length !== lefts.length) return null;
+
+    /** @type {[Player,Player][]} */ const result = [];
+
+    function backtrack(i, remainingLefts){
+      if(i === rights.length) return true;
+      const r = rights[i];
+      const idxs = shuffle([...Array(remainingLefts.length).keys()]);
+      for(const j of idxs){
+        const l = remainingLefts[j];
+        if(usedPairs.has(pairKey(r,l))) continue;
+
+        result.push([r,l]);
+        const next = remainingLefts.slice(0,j).concat(remainingLefts.slice(j+1));
+        if(backtrack(i+1, next)) return true;
+        result.pop();
+      }
+      return false;
+    }
+
+    return backtrack(0, lefts) ? result : null;
+  }
+
+  function addTurnUI(turnIndex, matches){
+    const wrap = document.createElement("div");
+    wrap.className = "turn";
+    const h = document.createElement("h3");
+    h.textContent = `Turno ${turnIndex}`;
+    const content = document.createElement("div");
+    content.className = "content";
+
+    matches.forEach((m, i)=>{
+      const div = document.createElement("div");
+      div.className = "court";
+      div.innerHTML = `<div class="muted"><b>Cancha ${i+1}</b></div>
+        <div>Equipo A: <code>${formatPair(m.a)}</code></div>
+        <div>Equipo B: <code>${formatPair(m.b)}</code></div>`;
+      content.appendChild(div);
+    });
+
+    wrap.appendChild(h);
+    wrap.appendChild(content);
+    out.appendChild(wrap);
+  }
+
+  function makeTurn(avoidRepeat, usedPairsA, usedPairsB){
+    const maxTries = 5000;
+    for(let t=0;t<maxTries;t++){
+      const pairsA = buildPairs(teamA, avoidRepeat ? usedPairsA : new Set());
+      if(!pairsA) continue;
+      const pairsB = buildPairs(teamB, avoidRepeat ? usedPairsB : new Set());
+      if(!pairsB) continue;
+
+      shuffle(pairsA); shuffle(pairsB);
+
+      const matches = [];
+      for(let i=0;i<COURTS;i++){
+        matches.push({a:pairsA[i], b:pairsB[i]});
+      }
+
+      if(avoidRepeat){
+        for(const m of matches){
+          usedPairsA.add(pairKey(m.a[0], m.a[1]));
+          usedPairsB.add(pairKey(m.b[0], m.b[1]));
+        }
+      }
+      return matches;
+    }
+    return null;
+  }
+
+  // ----- Actions -----
+  addA.addEventListener("click", ()=>{
+    const n = nameA.value.trim();
+    if(!n) return setStatus(statusA, "Escribe un nombre.", "error");
+    if(uniqueNameExists(n)) return setStatus(statusA, "Ese jugador ya está en A o B.", "error");
+    if(teamA.length >= TEAM_SIZE) return setStatus(statusA, "Equipo A ya tiene 8 jugadores.", "error");
+
+    teamA.push({name:n, side: sideA.value});
+    nameA.value = "";
+    renderTeams();
+    setStatus(statusA, `Agregado (${teamA.length}/8).`, "ok");
+  });
+
+  addB.addEventListener("click", ()=>{
+    const n = nameB.value.trim();
+    if(!n) return setStatus(statusB, "Escribe un nombre.", "error");
+    if(uniqueNameExists(n)) return setStatus(statusB, "Ese jugador ya está en A o B.", "error");
+    if(teamB.length >= TEAM_SIZE) return setStatus(statusB, "Equipo B ya tiene 8 jugadores.", "error");
+
+    teamB.push({name:n, side: sideB.value});
+    nameB.value = "";
+    renderTeams();
+    setStatus(statusB, `Agregado (${teamB.length}/8).`, "ok");
+  });
+
+  clearA.addEventListener("click", ()=>{
+    teamA = [];
+    renderTeams();
+    setStatus(statusA, "Equipo A vacío.", "ok");
+  });
+
+  clearB.addEventListener("click", ()=>{
+    teamB = [];
+    renderTeams();
+    setStatus(statusB, "Equipo B vacío.", "ok");
+  });
+
+  clearAllBtn.addEventListener("click", ()=>{
+    teamA = []; teamB = [];
+    renderTeams();
+    clearOutput();
+    setStatus(status, "Todo limpio.", "ok");
+    setStatus(statusA, "", ""); setStatus(statusB, "", "");
+  });
+
+  loadExampleBtn.addEventListener("click", ()=>{
+    teamA = [
+      {name:"Ana", side:"D"},{name:"Majo", side:"D"},{name:"Sofi", side:"D"},{name:"Vale", side:"D"},
+      {name:"Luis", side:"R"},{name:"Pablo", side:"R"},{name:"Diego", side:"R"},{name:"Juan", side:"R"},
+    ];
+    teamB = [
+      {name:"Nina", side:"D"},{name:"Cami", side:"D"},{name:"Kari", side:"D"},{name:"Iris", side:"D"},
+      {name:"Marco", side:"R"},{name:"Leo", side:"R"},{name:"Fede", side:"R"},{name:"Tomas", side:"R"},
+    ];
+    renderTeams();
+    clearOutput();
+    setStatus(status, "Ejemplo cargado. Ahora genera.", "ok");
+    setStatus(statusA, "", ""); setStatus(statusB, "", "");
+  });
+
+  genBtn.addEventListener("click", ()=>{
+    clearOutput();
+    const avoidRepeat = noRepeatEl.value === "yes";
+
+    try{
+      validateTeam(teamA, "Equipo A");
+      validateTeam(teamB, "Equipo B");
+
+      const usedPairsA = new Set();
+      const usedPairsB = new Set();
+
+      for(let t=1;t<=TURNS;t++){
+        const matches = makeTurn(avoidRepeat, usedPairsA, usedPairsB);
+        if(!matches){
+          throw new Error(
+            `No pude generar el turno ${t} sin repetir parejas. ` +
+            `Presiona "Generar" otra vez (hay aleatoriedad) o desactiva la regla.`
+          );
+        }
+        addTurnUI(t, matches);
+      }
+
+      setStatus(status, "✅ Generado: 3 turnos, 4 canchas (A vs B).", "ok");
+    }catch(e){
+      setStatus(status, e.message || String(e), "error");
+    }
+  });
+
+  copyBtn.addEventListener("click", async ()=>{
+    const text = out.innerText.trim();
+    if(!text) return setStatus(status, "No hay resultado para copiar.", "error");
+    try{
+      await navigator.clipboard.writeText(text);
+      setStatus(status, "Resultado copiado ✅", "ok");
+    }catch{
+      setStatus(status, "No se pudo copiar. Selecciona el texto y cópialo manualmente.", "error");
+    }
+  });
+
+  renderTeams();
+  setStatus(status, "Tip: usa 'Cargar ejemplo' para probar rápido.", "ok");
+})();
+</script>
+</body>
+</html>
