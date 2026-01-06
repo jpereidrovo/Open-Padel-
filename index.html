@@ -2,1218 +2,155 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Open Padel — Selección + Equipos A/B + Auto/Manual</title>
+  <title>Open Padel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
   <style>
-    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
-    body { margin: 0; background: #0b1020; color: #eef2ff; }
-    .wrap { max-width: 1600px; margin: 0 auto; padding: 18px; }
-    h1 { margin: 6px 0 14px; font-size: 20px; }
-    h2 { margin: 0 0 10px; font-size: 16px; }
-    .grid { display: grid; grid-template-columns: 1.45fr 1fr 1fr 1.15fr; gap: 14px; }
-    .card { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 14px; }
-    label { display: block; font-size: 12px; opacity: .9; margin-bottom: 6px; }
-    input, select, button {
-      width: 100%; box-sizing: border-box;
-      border-radius: 12px; border: 1px solid rgba(255,255,255,.18);
-      background: rgba(0,0,0,.25); color: #eef2ff;
-      padding: 10px 12px; outline: none;
-    }
-    input[type="number"] { padding-right: 6px; }
-    input[type="checkbox"] { width: auto; transform: scale(1.1); }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .row3 { display: grid; grid-template-columns: 1.2fr .8fr .8fr; gap: 10px; }
-    .btns { display: flex; gap: 10px; flex-wrap: wrap; }
-    button { cursor: pointer; font-weight: 650; }
-    button.primary { background: #4f46e5; border-color: rgba(255,255,255,.2); }
-    button.ghost { background: transparent; }
-    button.small { padding: 7px 10px; border-radius: 10px; font-weight: 750; width: auto; }
-    button:disabled { opacity: .55; cursor: not-allowed; }
-    .hint { font-size: 12px; opacity: .85; line-height: 1.35; }
-    .pill { display: inline-flex; gap: 8px; align-items: center; padding: 6px 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; font-size: 12px; }
-    .error { color: #fecaca; }
-    .ok { color: #bbf7d0; }
-    .warn { color: #fde68a; }
-    .muted { opacity: .8; }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-
-    .list { display: grid; gap: 10px; }
-    .turn { border: 1px solid rgba(255,255,255,.14); border-radius: 14px; overflow: hidden; }
-    .turn h3 { margin: 0; padding: 10px 12px; background: rgba(255,255,255,.06); font-size: 14px; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;}
-    .turn .content { padding: 12px; display: grid; gap: 10px; }
-    .court { padding: 10px 12px; border-radius: 12px; background: rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.12); display:grid; gap:6px;}
-    .scoreRow { display:grid; grid-template-columns: 1fr 180px; gap:10px; align-items:center; }
-
-    .table { display:grid; gap:8px; }
-
-    /* checkbox + nombre editable + side + rating + toA + toB */
-    .dbRow {
-      display: grid;
-      grid-template-columns: auto 1.2fr .55fr .55fr auto auto;
-      gap: 8px;
-      align-items: center;
-      padding: 10px 12px;
-      border: 1px solid rgba(255,255,255,.12);
-      background: rgba(0,0,0,.18);
-      border-radius: 12px;
-    }
-    .mini { font-size: 12px; opacity:.85; }
-    .badge { display:inline-flex; padding: 3px 8px; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; font-size: 12px; opacity:.95; justify-content:center; }
-    .split { display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; }
-
-    .teamList { display:grid; gap:8px; }
-    .teamItem {
-      display:grid;
-      grid-template-columns: 1fr auto auto;
-      gap:10px;
-      align-items:center;
-      padding: 10px 12px;
-      border: 1px solid rgba(255,255,255,.12);
-      background: rgba(0,0,0,.18);
-      border-radius: 12px;
-    }
-
-    .dbRow select, .dbRow input[type="number"], .dbRow input.nameInp{
-      width: 100%;
-      padding: 8px 10px;
-      border-radius: 10px;
-    }
-    .dbRow input.nameInp{
-      font-weight: 800;
-    }
-
-    @media (max-width: 1200px) { .grid { grid-template-columns: 1fr; } }
-
-    /* Print (PDF) */
-    @media print {
-      body { background: white; color: black; }
-      .card { border: 1px solid #ddd; background: white; }
-      button, select, input, .hint, .pill, #controlsCard { display: none !important; }
-      .wrap { max-width: none; padding: 0; }
-      .turn { border: 1px solid #ddd; }
-      .court { border: 1px solid #ddd; background: white; }
-      code { color: black; }
-    }
+    body { font-family: system-ui, Arial; background:#0b1020; color:#eef2ff; margin:0 }
+    .wrap { max-width:1100px; margin:auto; padding:16px }
+    h1 { font-size:20px }
+    button { padding:10px 14px; border-radius:8px; border:none; cursor:pointer }
+    button.primary { background:#4f46e5; color:white }
+    button.ghost { background:#1f2937; color:white }
+    input, select { padding:8px; border-radius:6px; border:1px solid #555; background:#111; color:white }
+    .card { background:#111827; padding:14px; border-radius:12px; margin-bottom:14px }
+    .row { display:flex; gap:10px; flex-wrap:wrap }
+    .row > * { flex:1 }
+    .list { display:grid; gap:8px }
+    .item { background:#1f2937; padding:10px; border-radius:8px; display:flex; justify-content:space-between; align-items:center }
+    .muted { opacity:.7; font-size:12px }
   </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Open Padel — Selección de jugadores → Equipos A/B (Auto o Manual) → Turnos</h1>
+  <h1>🎾 Open Padel</h1>
 
-  <div class="hint" style="margin-bottom:12px;">
-    <span class="pill">Pareja: <b>D + R</b></span>
-    <span class="pill">Turnos: <b>3</b></span>
-    <span class="pill" id="pillPlayers">Jugadores: <b>16</b></span>
-    <span class="pill" id="pillCourts">Canchas/turno: <b>4</b></span>
-    <span class="pill">Marcador por cancha</span>
+  <!-- LOGIN -->
+  <div class="card" id="authCard">
+    <div id="authStatus" class="muted">Comprobando sesión…</div>
+    <button class="primary" id="loginBtn">Iniciar sesión con Google</button>
+    <button class="ghost" id="logoutBtn" style="display:none">Cerrar sesión</button>
   </div>
 
-  <div class="grid">
-    <!-- BASE + SELECCIÓN -->
-    <div class="card" id="controlsCard">
-      <div class="split">
-        <h2>Base + Selección</h2>
-        <div class="mini" id="dbCount"></div>
-      </div>
+  <!-- BASE -->
+  <div class="card" id="app" style="display:none">
+    <h3>Base de jugadores</h3>
 
-      <div class="row">
-        <div>
-          <label>Cantidad de jugadores a jugar</label>
-          <select id="totalPlayers">
-            <option value="4">4</option>
-            <option value="8">8</option>
-            <option value="12">12</option>
-            <option value="16" selected>16</option>
-            <option value="20">20</option>
-            <option value="24">24</option>
-          </select>
-        </div>
-        <div>
-          <label>Estado de selección</label>
-          <div class="pill" id="selPill" style="width:100%;justify-content:space-between;">
-            <span id="selCountText">0/16</span>
-            <span class="muted" id="selSideText">D:0 R:0</span>
-          </div>
-          <div class="mini" id="selNeedText" style="margin-top:6px;"></div>
-        </div>
-      </div>
-
-      <div style="height:10px"></div>
-      <div class="btns">
-        <button class="primary" id="autoTeams">Autoarmar A/B (balanceado)</button>
-        <button class="ghost" id="clearSelection">Limpiar selección</button>
-      </div>
-
-      <div style="height:10px"></div>
-      <div class="row3">
-        <div>
-          <label>Nombre (para agregar a base)</label>
-          <input id="dbName" placeholder="Ej: Ana" />
-        </div>
-        <div>
-          <label>Lado</label>
-          <select id="dbSide">
-            <option value="D">Derecha (D)</option>
-            <option value="R">Revés (R)</option>
-          </select>
-        </div>
-        <div>
-          <label>Nivel (1–10)</label>
-          <input id="dbRating" type="number" min="1" max="10" value="5" />
-        </div>
-      </div>
-
-      <div style="height:10px"></div>
-      <div class="btns">
-        <button class="primary" id="dbAdd">Agregar a base</button>
-        <button class="ghost" id="dbClear">Borrar base</button>
-      </div>
-
-      <div style="height:12px"></div>
-
-      <div class="row">
-        <div>
-          <label>Buscar</label>
-          <input id="dbSearch" placeholder="Filtrar por nombre..." />
-        </div>
-        <div>
-          <label>Ordenar</label>
-          <select id="dbSort">
-            <option value="name">Nombre</option>
-            <option value="ratingDesc">Nivel (mayor→menor)</option>
-            <option value="ratingAsc">Nivel (menor→mayor)</option>
-            <option value="side">Lado (D/R)</option>
-          </select>
-        </div>
-      </div>
-
-      <div style="height:12px"></div>
-      <div class="table" id="dbList"></div>
-
-      <div id="dbStatus" class="hint" style="margin-top:10px;"></div>
-      <div class="hint muted" style="margin-top:8px;">
-        ✔ Puedes editar el <b>nombre</b>, <b>D/R</b> y <b>nivel</b> en la lista.<br/>
-        ✔ Para seleccionar, marca checkbox (no te dejará pasar del D/R requerido).
-      </div>
+    <div class="row">
+      <input id="name" placeholder="Nombre" />
+      <select id="side">
+        <option value="D">Derecha</option>
+        <option value="R">Revés</option>
+      </select>
+      <input id="rating" type="number" min="1" max="10" value="5" />
+      <button class="primary" id="add">Agregar</button>
     </div>
 
-    <!-- SELECCIONADOS (POOL) -->
-    <div class="card">
-      <div class="split">
-        <h2>Seleccionados (Pool)</h2>
-        <div class="mini" id="poolInfo"></div>
-      </div>
-      <div class="teamList" id="poolList"></div>
-      <div id="poolStatus" class="hint" style="margin-top:10px;"></div>
-    </div>
-
-    <!-- EQUIPO A -->
-    <div class="card">
-      <div class="split">
-        <h2>Equipo A</h2>
-        <div class="mini" id="teamAInfo"></div>
-      </div>
-      <div class="teamList" id="teamAList"></div>
-      <div style="height:10px"></div>
-      <div class="btns">
-        <button class="ghost" id="teamAClear">Vaciar A</button>
-      </div>
-      <div id="teamAStatus" class="hint"></div>
-    </div>
-
-    <!-- EQUIPO B + TURNOS -->
-    <div class="card">
-      <div class="split">
-        <h2>Equipo B</h2>
-        <div class="mini" id="teamBInfo"></div>
-      </div>
-      <div class="teamList" id="teamBList"></div>
-
-      <div style="height:10px"></div>
-      <div class="btns">
-        <button class="ghost" id="teamBClear">Vaciar B</button>
-      </div>
-      <div id="teamBStatus" class="hint"></div>
-
-      <hr style="border:none;border-top:1px solid rgba(255,255,255,.12);margin:14px 0;" />
-
-      <h2>Turnos</h2>
-      <div class="row">
-        <div>
-          <label>No repetir parejas (A ni B)</label>
-          <select id="noRepeatPairs">
-            <option value="yes" selected>Sí</option>
-            <option value="no">No</option>
-          </select>
-        </div>
-        <div>
-          <label>Exportar</label>
-          <select id="exportMode">
-            <option value="csv">Excel (CSV)</option>
-            <option value="pdf">PDF (Imprimir)</option>
-          </select>
-        </div>
-      </div>
-
-      <div style="height:10px"></div>
-      <div class="btns">
-        <button class="primary" id="gen">Generar 3 turnos</button>
-        <button class="ghost" id="export">Exportar</button>
-        <button class="ghost" id="copy">Copiar</button>
-        <button class="ghost" id="loadExample">Cargar ejemplo</button>
-        <button class="ghost" id="clearAll">Limpiar todo (menos base)</button>
-      </div>
-
-      <div id="status" class="hint" style="margin-top:10px;"></div>
-
-      <div style="height:12px"></div>
-      <label>Resultado</label>
-      <div id="out" class="list"></div>
-
-      <div class="hint muted" style="margin-top:12px;">
-        PDF: Exportar → impresión → <b>Guardar como PDF</b>.
-      </div>
-    </div>
+    <div class="list" id="players"></div>
   </div>
 </div>
 
 <script>
-(() => {
-  /** @typedef {{id:string, name:string, side:'D'|'R', rating:number}} PlayerDB */
-  /** @typedef {{id:string}} Ref */
-
-  const TURNS = 3;
-
-  // ✅ Claves ESTABLES (no cambian con actualizaciones)
-  const STORE_DB = "open_padel_db";
-  const STORE_STATE = "open_padel_state";
-  const STORE_SCORES = "open_padel_scores";
-
-  // Claves antiguas (migración)
-  const LEGACY_DB_KEYS = ["open_padel_db_v4","open_padel_db_v3","open_padel_db_v2","open_padel_db_v1"];
-  const LEGACY_STATE_KEYS = ["open_padel_state_v4","open_padel_teams_v3","open_padel_teams_v2","open_padel_teams_v1"];
-  const LEGACY_SCORES_KEYS = ["open_padel_scores_v4","open_padel_scores_v3","open_padel_scores_v2","open_padel_scores_v1"];
-
-  const $ = (id)=>document.getElementById(id);
-
-  // UI
-  const totalPlayersEl = $("totalPlayers");
-  const pillPlayers = $("pillPlayers");
-  const pillCourts = $("pillCourts");
-
-  const selCountText = $("selCountText");
-  const selSideText = $("selSideText");
-  const selNeedText = $("selNeedText");
-  const poolInfo = $("poolInfo");
-
-  const dbName = $("dbName");
-  const dbSide = $("dbSide");
-  const dbRating = $("dbRating");
-  const dbAdd = $("dbAdd");
-  const dbClear = $("dbClear");
-  const dbSearch = $("dbSearch");
-  const dbSort = $("dbSort");
-  const dbList = $("dbList");
-  const dbCount = $("dbCount");
-  const dbStatus = $("dbStatus");
-
-  const clearSelectionBtn = $("clearSelection");
-  const autoTeamsBtn = $("autoTeams");
-
-  const poolList = $("poolList");
-  const poolStatus = $("poolStatus");
-
-  const teamAList = $("teamAList");
-  const teamBList = $("teamBList");
-  const teamAInfo = $("teamAInfo");
-  const teamBInfo = $("teamBInfo");
-  const teamAClear = $("teamAClear");
-  const teamBClear = $("teamBClear");
-  const teamAStatus = $("teamAStatus");
-  const teamBStatus = $("teamBStatus");
-
-  const noRepeatPairsEl = $("noRepeatPairs");
-  const exportModeEl = $("exportMode");
-  const genBtn = $("gen");
-  const exportBtn = $("export");
-  const copyBtn = $("copy");
-  const loadExampleBtn = $("loadExample");
-  const clearAllBtn = $("clearAll");
-  const status = $("status");
-  const out = $("out");
-
-  /** @type {PlayerDB[]} */ let db = [];
-  /** @type {Ref[]} */ let selected = []; // pool
-  /** @type {Ref[]} */ let teamA = [];
-  /** @type {Ref[]} */ let teamB = [];
-  /** @type {Map<string,string>} */ let scores = new Map();
-
-  // Derived config
-  function totalPlayers(){ return Number(totalPlayersEl.value); }
-  function teamSize(){ return totalPlayers() / 2; }
-  function courts(){ return totalPlayers() / 4; }
-  function perTeamSide(){ return teamSize() / 2; } // D and R per team
-  function totalPerSide(){ return totalPlayers() / 2; } // total D and total R in selected
-
-  function setStatus(el, msg, kind="") {
-    el.className = "hint " + (kind==="error" ? "error" : kind==="ok" ? "ok" : kind==="warn" ? "warn" : "");
-    el.textContent = msg;
-  }
-
-  function uid() {
-    return Math.random().toString(16).slice(2) + "-" + Date.now().toString(16);
-  }
-
-  function byId(id) { return db.find(p => p.id === id) || null; }
-
-  function countSide(refs, side) {
-    return refs.reduce((acc, r) => {
-      const p = byId(r.id);
-      return acc + (p && p.side === side ? 1 : 0);
-    }, 0);
-  }
-
-  function avgRating(refs) {
-    const players = refs.map(r => byId(r.id)).filter(Boolean);
-    if (!players.length) return 0;
-    const sum = players.reduce((a,p)=>a+p.rating,0);
-    return Math.round((sum / players.length) * 10) / 10;
-  }
-
-  function clearOutput(){ out.innerHTML = ""; }
-
-  function saveAll() {
-    try {
-      localStorage.setItem(STORE_DB, JSON.stringify(db));
-      localStorage.setItem(STORE_STATE, JSON.stringify({
-        totalPlayers: totalPlayers(),
-        selected, teamA, teamB
-      }));
-      localStorage.setItem(STORE_SCORES, JSON.stringify(Object.fromEntries(scores)));
-    } catch {}
-  }
-
-  function loadKeyFirst(keys){
-    for(const k of keys){
-      const v = localStorage.getItem(k);
-      if(v) return {key:k, val:v};
-    }
-    return null;
-  }
-
-  // ✅ Migración automática si existe data vieja
-  function migrateIfNeeded(){
-    if(localStorage.getItem(STORE_DB)) return; // ya en formato nuevo
-
-    const legacyDB = loadKeyFirst(LEGACY_DB_KEYS);
-    if(legacyDB){
-      try { localStorage.setItem(STORE_DB, legacyDB.val); } catch {}
-    }
-
-    const legacyScores = loadKeyFirst(LEGACY_SCORES_KEYS);
-    if(legacyScores){
-      try { localStorage.setItem(STORE_SCORES, legacyScores.val); } catch {}
-    }
-
-    // Para state, aceptamos lo que haya (algunos legacy solo tenían teams)
-    const legacyState = loadKeyFirst(LEGACY_STATE_KEYS);
-    if(legacyState){
-      try {
-        // Si es formato {teamA, teamB} lo adaptamos a {totalPlayers, selected, teamA, teamB}
-        const obj = JSON.parse(legacyState.val);
-        if(obj && (obj.teamA || obj.teamB) && !obj.selected){
-          const tA = Array.isArray(obj.teamA) ? obj.teamA : [];
-          const tB = Array.isArray(obj.teamB) ? obj.teamB : [];
-          const total = (tA.length + tB.length) || 16;
-          localStorage.setItem(STORE_STATE, JSON.stringify({ totalPlayers: total, selected: [], teamA: tA, teamB: tB }));
-        } else {
-          localStorage.setItem(STORE_STATE, legacyState.val);
-        }
-      } catch {}
-    }
-  }
-
-  function loadAll() {
-    migrateIfNeeded();
-    try {
-      const rawDB = localStorage.getItem(STORE_DB);
-      const rawState = localStorage.getItem(STORE_STATE);
-      const rawScores = localStorage.getItem(STORE_SCORES);
-
-      if (rawDB) db = JSON.parse(rawDB) || [];
-
-      if (rawState) {
-        const st = JSON.parse(rawState) || {};
-        const v = Number(st.totalPlayers);
-        if ([4,8,12,16,20,24].includes(v)) totalPlayersEl.value = String(v);
-        selected = Array.isArray(st.selected) ? st.selected : [];
-        teamA = Array.isArray(st.teamA) ? st.teamA : [];
-        teamB = Array.isArray(st.teamB) ? st.teamB : [];
-      }
-
-      if (rawScores) {
-        const o = JSON.parse(rawScores) || {};
-        scores = new Map(Object.entries(o));
-      }
-    } catch {}
-  }
-
-  function normalizeName(s){
-    return (s ?? "").trim().replace(/\s+/g," ");
-  }
-
-  function nameExists(name, exceptId=null){
-    const n = normalizeName(name).toLowerCase();
-    return db.some(p => p.id !== exceptId && normalizeName(p.name).toLowerCase() === n);
-  }
-
-  function selectionStats(){
-    const d = countSide(selected,"D");
-    const r = countSide(selected,"R");
-    const need = totalPerSide();
-    return {d, r, need, ok: (d===need && r===need && selected.length===totalPlayers())};
-  }
-
-  function renderPills(){
-    pillPlayers.innerHTML = `Jugadores: <b>${totalPlayers()}</b>`;
-    pillCourts.innerHTML = `Canchas/turno: <b>${courts()}</b>`;
-  }
-
-  function renderSelectionHeader(){
-    const d = countSide(selected,"D");
-    const r = countSide(selected,"R");
-    const need = totalPerSide();
-
-    selCountText.textContent = `${selected.length}/${totalPlayers()}`;
-    selSideText.textContent = `D:${d} R:${r}`;
-
-    // Necesidades
-    let msg = `Requiere D:${need} R:${need}. `;
-    const dDiff = need - d;
-    const rDiff = need - r;
-
-    if(selected.length < totalPlayers()){
-      // todavía falta completar N
-      msg += `Faltan ${totalPlayers()-selected.length} jugadores`;
-      if(dDiff>0 || rDiff>0) msg += ` | faltan D:${Math.max(0,dDiff)} R:${Math.max(0,rDiff)}`;
-      if(dDiff<0 || rDiff<0) msg += ` | sobran D:${Math.max(0,-dDiff)} R:${Math.max(0,-rDiff)}`;
-      selNeedText.className = "mini warn";
-    } else {
-      // ya completó N
-      if(d===need && r===need){
-        msg += "✅ Selección correcta (mix D/R OK).";
-        selNeedText.className = "mini ok";
-      } else {
-        msg += `❌ Mix incorrecto: `;
-        if(d!==need) msg += `D=${d} `;
-        if(r!==need) msg += `R=${r} `;
-        selNeedText.className = "mini error";
-      }
-    }
-
-    selNeedText.textContent = msg;
-    poolInfo.textContent = `${selected.length}/${totalPlayers()} • D:${d} R:${r} • prom:${avgRating(selected)}`;
-  }
-
-  function renderDB(){
-    const q = dbSearch.value.trim().toLowerCase();
-    const sort = dbSort.value;
-
-    let items = db.slice().filter(p => normalizeName(p.name).toLowerCase().includes(q));
-    if (sort === "name") items.sort((a,b)=>normalizeName(a.name).localeCompare(normalizeName(b.name)));
-    if (sort === "ratingDesc") items.sort((a,b)=>b.rating-a.rating || normalizeName(a.name).localeCompare(normalizeName(b.name)));
-    if (sort === "ratingAsc") items.sort((a,b)=>a.rating-b.rating || normalizeName(a.name).localeCompare(normalizeName(b.name)));
-    if (sort === "side") items.sort((a,b)=>a.side.localeCompare(b.side) || normalizeName(a.name).localeCompare(normalizeName(b.name)));
-
-    dbCount.textContent = `${db.length} en base`;
-    dbList.innerHTML = "";
-
-    const maxSel = totalPlayers();
-    const needPerSide = totalPerSide();
-
-    for(const p of items){
-      const isSel = selected.some(r=>r.id===p.id);
-      const isInTeams = teamA.some(r=>r.id===p.id) || teamB.some(r=>r.id===p.id);
-
-      // reglas para checkbox:
-      // - no seleccionar si está en equipos
-      // - no pasar de N
-      // - no pasar de D o R requerido
-      const dNow = countSide(selected,"D");
-      const rNow = countSide(selected,"R");
-      const wouldBeD = p.side==="D" ? dNow+ (isSel?0:1) : dNow;
-      const wouldBeR = p.side==="R" ? rNow+ (isSel?0:1) : rNow;
-      const selFull = selected.length >= maxSel;
-
-      const disablePick =
-        isInTeams ||
-        (!isSel && selFull) ||
-        (!isSel && (wouldBeD > needPerSide || wouldBeR > needPerSide));
-
-      const row = document.createElement("div");
-      row.className = "dbRow";
-
-      row.innerHTML = `
-        <input type="checkbox" class="pickCb" data-id="${p.id}" ${isSel ? "checked":""} ${disablePick ? "disabled":""} />
-
-        <div>
-          <input class="nameInp" data-id="${p.id}" value="${escapeHtmlAttr(normalizeName(p.name))}" />
-          <div class="mini muted">${isInTeams ? "En A/B" : (isSel ? "Seleccionado" : "Disponible")} • ${p.id.slice(0,6)}</div>
-        </div>
-
-        <select class="sideSel" data-id="${p.id}">
-          <option value="D" ${p.side==="D" ? "selected":""}>D</option>
-          <option value="R" ${p.side==="R" ? "selected":""}>R</option>
-        </select>
-
-        <input class="ratingInp" data-id="${p.id}" type="number" min="1" max="10" value="${p.rating}" />
-
-        <button class="ghost small" data-act="toA" data-id="${p.id}" ${(!isSel || teamA.length>=teamSize()) ? "disabled":""}>→ A</button>
-        <button class="ghost small" data-act="toB" data-id="${p.id}" ${(!isSel || teamB.length>=teamSize()) ? "disabled":""}>→ B</button>
-      `;
-      dbList.appendChild(row);
-    }
-
-    // Checkbox select/deselect
-    dbList.querySelectorAll("input.pickCb").forEach(cb=>{
-      cb.addEventListener("change", ()=>{
-        const id = cb.getAttribute("data-id");
-        if(!id) return;
-
-        const p = byId(id);
-        if(!p) return;
-
-        if(cb.checked){
-          // límite total
-          if(selected.length >= totalPlayers()){
-            cb.checked = false;
-            return setStatus(dbStatus, `Ya tienes ${totalPlayers()} seleccionados.`, "error");
-          }
-          // no seleccionar si está en equipos
-          if(teamA.some(r=>r.id===id) || teamB.some(r=>r.id===id)){
-            cb.checked = false;
-            return setStatus(dbStatus, "Ese jugador ya está en A/B.", "error");
-          }
-          // límite por lado
-          const dNow = countSide(selected,"D");
-          const rNow = countSide(selected,"R");
-          const need = totalPerSide();
-          if(p.side==="D" && dNow >= need){
-            cb.checked = false;
-            return setStatus(dbStatus, `Ya tienes ${need} Derecha (D).`, "warn");
-          }
-          if(p.side==="R" && rNow >= need){
-            cb.checked = false;
-            return setStatus(dbStatus, `Ya tienes ${need} Revés (R).`, "warn");
-          }
-
-          selected.push({id});
-        }else{
-          selected = selected.filter(r=>r.id!==id);
-          teamA = teamA.filter(r=>r.id!==id);
-          teamB = teamB.filter(r=>r.id!==id);
-        }
-
-        scores.clear();
-        clearOutput();
-        saveAll();
-        render();
-      });
-    });
-
-    // Editar NOMBRE (on blur + Enter)
-    dbList.querySelectorAll("input.nameInp").forEach(inp=>{
-      const apply = ()=>{
-        const id = inp.getAttribute("data-id");
-        if(!id) return;
-        const original = byId(id);
-        if(!original) return;
-
-        const newName = normalizeName(inp.value);
-        if(!newName){
-          inp.value = normalizeName(original.name);
-          return setStatus(dbStatus, "Nombre inválido (vacío).", "error");
-        }
-        if(nameExists(newName, id)){
-          inp.value = normalizeName(original.name);
-          return setStatus(dbStatus, "Ya existe otro jugador con ese nombre.", "error");
-        }
-
-        if(newName !== normalizeName(original.name)){
-          db = db.map(p => p.id===id ? ({...p, name: newName}) : p);
-          saveAll();
-          renderSelectionHeader();
-          setStatus(dbStatus, "Nombre actualizado.", "ok");
-        }
-      };
-
-      inp.addEventListener("blur", apply);
-      inp.addEventListener("keydown", (e)=>{
-        if(e.key === "Enter"){
-          e.preventDefault();
-          inp.blur();
-        }
-      });
-    });
-
-    // Edit side inline
-    dbList.querySelectorAll("select.sideSel").forEach(sel=>{
-      sel.addEventListener("change", ()=>{
-        const id = sel.getAttribute("data-id");
-        if(!id) return;
-        const v = sel.value.toUpperCase();
-        if(v!=="D" && v!=="R") return;
-
-        // Si está seleccionado, no dejamos cambiar a un lado que rompa límites
-        const isSel = selected.some(r=>r.id===id);
-        if(isSel){
-          const dNow = countSide(selected,"D");
-          const rNow = countSide(selected,"R");
-          const need = totalPerSide();
-          const old = byId(id)?.side;
-
-          // simulación: quitar old, poner new
-          const dSim = dNow - (old==="D" ? 1 : 0) + (v==="D" ? 1 : 0);
-          const rSim = rNow - (old==="R" ? 1 : 0) + (v==="R" ? 1 : 0);
-
-          if(dSim > need || rSim > need){
-            // revert
-            sel.value = old || "D";
-            return setStatus(dbStatus, `No se puede: excede el mix requerido (D:${need} R:${need}).`, "warn");
-          }
-        }
-
-        db = db.map(p => p.id===id ? ({...p, side: v}) : p);
-        saveAll();
-        render();
-        setStatus(dbStatus, "Lado actualizado.", "ok");
-      });
-    });
-
-    // Edit rating inline
-    dbList.querySelectorAll("input.ratingInp").forEach(inp=>{
-      inp.addEventListener("change", ()=>{
-        const id = inp.getAttribute("data-id");
-        if(!id) return;
-        let n = Number(inp.value);
-        if(!Number.isFinite(n)) n = 5;
-        n = Math.max(1, Math.min(10, Math.round(n)));
-        inp.value = String(n);
-
-        db = db.map(p => p.id===id ? ({...p, rating: n}) : p);
-        saveAll();
-        renderSelectionHeader();
-        setStatus(dbStatus, "Nivel actualizado.", "ok");
-      });
-    });
-
-    // Manual move to A/B (only from selected)
-    dbList.querySelectorAll("button").forEach(btn=>{
-      btn.addEventListener("click", ()=>{
-        const act = btn.getAttribute("data-act");
-        const id = btn.getAttribute("data-id");
-        if(!id) return;
-        if(act==="toA") moveSelectedToTeam(id, "A");
-        if(act==="toB") moveSelectedToTeam(id, "B");
-      });
-    });
-  }
-
-  function renderPool(){
-    poolList.innerHTML = "";
-    const players = selected.map(r=>byId(r.id)).filter(Boolean);
-    players.sort((a,b)=>a.side.localeCompare(b.side) || b.rating-a.rating || normalizeName(a.name).localeCompare(normalizeName(b.name)));
-
-    for(const p of players){
-      const item = document.createElement("div");
-      item.className = "teamItem";
-      item.innerHTML = `
-        <div>
-          <div><b>${escapeHtml(normalizeName(p.name))}</b> <span class="badge">${p.side}</span> <span class="badge">${p.rating}</span></div>
-          <div class="mini muted">Seleccionado</div>
-        </div>
-        <button class="ghost small" data-act="toA" data-id="${p.id}" ${teamA.length>=teamSize() ? "disabled":""}>→ A</button>
-        <button class="ghost small" data-act="toB" data-id="${p.id}" ${teamB.length>=teamSize() ? "disabled":""}>→ B</button>
-      `;
-      item.querySelectorAll("button").forEach(btn=>{
-        btn.addEventListener("click", ()=>{
-          const act = btn.getAttribute("data-act");
-          if(act==="toA") moveSelectedToTeam(p.id, "A");
-          if(act==="toB") moveSelectedToTeam(p.id, "B");
-        });
-      });
-      poolList.appendChild(item);
-    }
-  }
-
-  function renderTeams(){
-    function renderTeam(listEl, refs, label){
-      listEl.innerHTML = "";
-      const players = refs.map(r=>byId(r.id)).filter(Boolean);
-      players.sort((a,b)=>a.side.localeCompare(b.side) || b.rating-a.rating || normalizeName(a.name).localeCompare(normalizeName(b.name)));
-
-      for(const p of players){
-        const item = document.createElement("div");
-        item.className = "teamItem";
-        item.innerHTML = `
-          <div>
-            <div><b>${escapeHtml(normalizeName(p.name))}</b> <span class="badge">${p.side}</span> <span class="badge">${p.rating}</span></div>
-            <div class="mini muted">${label}</div>
-          </div>
-          <button class="ghost small" data-act="back" data-id="${p.id}">← Pool</button>
-          <button class="ghost small" data-act="remove" data-id="${p.id}">Quitar</button>
-        `;
-
-        item.querySelector('[data-act="back"]').addEventListener("click", ()=>{
-          if(!selected.some(r=>r.id===p.id)) selected.push({id:p.id});
-          if(label==="Equipo A") teamA = teamA.filter(r=>r.id!==p.id);
-          else teamB = teamB.filter(r=>r.id!==p.id);
-          scores.clear(); clearOutput();
-          saveAll(); render();
-        });
-
-        item.querySelector('[data-act="remove"]').addEventListener("click", ()=>{
-          selected = selected.filter(r=>r.id!==p.id);
-          if(label==="Equipo A") teamA = teamA.filter(r=>r.id!==p.id);
-          else teamB = teamB.filter(r=>r.id!==p.id);
-          scores.clear(); clearOutput();
-          saveAll(); render();
-        });
-
-        listEl.appendChild(item);
-      }
-    }
-
-    renderTeam(teamAList, teamA, "Equipo A");
-    renderTeam(teamBList, teamB, "Equipo B");
-
-    teamAInfo.textContent = `${teamA.length}/${teamSize()} • D:${countSide(teamA,"D")} R:${countSide(teamA,"R")} • prom:${avgRating(teamA)}`;
-    teamBInfo.textContent = `${teamB.length}/${teamSize()} • D:${countSide(teamB,"D")} R:${countSide(teamB,"R")} • prom:${avgRating(teamB)}`;
-  }
-
-  function render(){
-    renderPills();
-    renderSelectionHeader();
-    renderPool();
-    renderTeams();
-    renderDB();
-  }
-
-  // Manual: move from selected -> team
-  function moveSelectedToTeam(id, team){
-    if(!selected.some(r=>r.id===id)) return setStatus(poolStatus, "Ese jugador no está en el pool.", "error");
-    if(team==="A" && teamA.length>=teamSize()) return setStatus(teamAStatus, `A ya tiene ${teamSize()}.`, "error");
-    if(team==="B" && teamB.length>=teamSize()) return setStatus(teamBStatus, `B ya tiene ${teamSize()}.`, "error");
-
-    selected = selected.filter(r=>r.id!==id);
-
-    if(team==="A"){
-      if(!teamA.some(r=>r.id===id)) teamA.push({id});
-      setStatus(teamAStatus, "Agregado a A.", "ok");
-    } else {
-      if(!teamB.some(r=>r.id===id)) teamB.push({id});
-      setStatus(teamBStatus, "Agregado a B.", "ok");
-    }
-
-    scores.clear();
-    clearOutput();
-    saveAll();
-    render();
-  }
-
-  function validateSelectedOrThrow(){
-    // total seleccionados = pool + teams
-    const total = selected.length + teamA.length + teamB.length;
-    if(total !== totalPlayers()){
-      throw new Error(`Debes tener exactamente ${totalPlayers()} jugadores seleccionados (Pool + A + B).`);
-    }
-    const need = totalPerSide();
-    const d = countSide(selected,"D") + countSide(teamA,"D") + countSide(teamB,"D");
-    const r = countSide(selected,"R") + countSide(teamA,"R") + countSide(teamB,"R");
-    if(d !== need || r !== need){
-      throw new Error(`Mix inválido en selección total: requiere D:${need} R:${need} (tienes D:${d} R:${r}).`);
-    }
-  }
-
-  function validateTeamsOrThrow(){
-    if(teamA.length !== teamSize()) throw new Error(`Equipo A debe tener ${teamSize()} jugadores.`);
-    if(teamB.length !== teamSize()) throw new Error(`Equipo B debe tener ${teamSize()} jugadores.`);
-    if(countSide(teamA,"D") !== perTeamSide() || countSide(teamA,"R") !== perTeamSide())
-      throw new Error(`Equipo A debe tener ${perTeamSide()}D y ${perTeamSide()}R.`);
-    if(countSide(teamB,"D") !== perTeamSide() || countSide(teamB,"R") !== perTeamSide())
-      throw new Error(`Equipo B debe tener ${perTeamSide()}D y ${perTeamSide()}R.`);
-  }
-
-  // Autoarmar usando SOLO los seleccionados totales (pool + A/B)
-  function autoBuildTeamsBalancedFromSelected(){
-    const allIds = new Set([
-      ...selected.map(r=>r.id),
-      ...teamA.map(r=>r.id),
-      ...teamB.map(r=>r.id),
-    ]);
-
-    if(allIds.size !== totalPlayers()) throw new Error(`Selecciona exactamente ${totalPlayers()} jugadores antes de autoarmar.`);
-
-    const players = [...allIds].map(id=>byId(id)).filter(Boolean);
-    const needPerSide = totalPerSide();
-    const needPerTeamSide = perTeamSide();
-
-    const rights = players.filter(p=>p.side==="D").slice().sort((a,b)=>b.rating-a.rating);
-    const lefts  = players.filter(p=>p.side==="R").slice().sort((a,b)=>b.rating-a.rating);
-
-    if(rights.length !== needPerSide || lefts.length !== needPerSide){
-      throw new Error(`Los ${totalPlayers()} seleccionados deben tener ${needPerSide}D y ${needPerSide}R.`);
-    }
-
-    function splitBalanced(list, countPerTeam){
-      const hi = list.slice(0, countPerTeam).slice();          // top
-      const lo = list.slice(countPerTeam).slice().reverse();   // bottom
-      const merged = [];
-      for(let i=0;i<countPerTeam;i++){
-        merged.push(hi[i]);
-        merged.push(lo[i]);
-      }
-      const a=[], b=[];
-      merged.forEach((p, idx)=> (idx%2===0 ? a : b).push(p));
-      return {a, b};
-    }
-
-    const dSplit = splitBalanced(rights, needPerTeamSide);
-    const rSplit = splitBalanced(lefts, needPerTeamSide);
-
-    const A = [...dSplit.a, ...rSplit.a];
-    const B = [...dSplit.b, ...rSplit.b];
-
-    teamA = A.map(p=>({id:p.id}));
-    teamB = B.map(p=>({id:p.id}));
-    selected = [];
-
-    scores.clear();
-    clearOutput();
-    saveAll();
-    render();
-
-    setStatus(status, `✅ Autoarmado listo con los ${totalPlayers()} seleccionados.`, "ok");
-  }
-
-  // Turnos
-  function matchId(turn, court){ return `T${turn}-C${court}`; }
-
-  function escapeHtml(s) {
-    return (s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
-  }
-  function escapeHtmlAttr(s){
-    return escapeHtml(s).replaceAll('"',"&quot;");
-  }
-
-  function shuffle(arr){
-    for(let i=arr.length-1;i>0;i--){
-      const j = Math.floor(Math.random()*(i+1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
-  }
-
-  function pairKey(a,b){ return [a.id,b.id].sort().join("||"); }
-  function formatPlayer(p){ return `${normalizeName(p.name)}(${p.side})-${p.rating}`; }
-  function formatPair(pair){ return `${formatPlayer(pair[0])} + ${formatPlayer(pair[1])}`; }
-
-  // Backtracking D+R
-  function buildPairs(teamRefs, usedPairs){
-    const players = teamRefs.map(r=>byId(r.id)).filter(Boolean);
-    const rights = shuffle(players.filter(p=>p.side==="D").slice());
-    const lefts  = players.filter(p=>p.side==="R").slice();
-    if(rights.length !== lefts.length) return null;
-
-    /** @type {[PlayerDB,PlayerDB][]} */ const result = [];
-
-    function backtrack(i, remainingLefts){
-      if(i===rights.length) return true;
-      const r = rights[i];
-      const idxs = shuffle([...Array(remainingLefts.length).keys()]);
-      for(const j of idxs){
-        const l = remainingLefts[j];
-        const k = pairKey(r,l);
-        if(usedPairs.has(k)) continue;
-
-        result.push([r,l]);
-        const next = remainingLefts.slice(0,j).concat(remainingLefts.slice(j+1));
-        if(backtrack(i+1,next)) return true;
-        result.pop();
-      }
-      return false;
-    }
-    return backtrack(0,lefts) ? result : null;
-  }
-
-  function addTurnUI(turnIndex, matches){
-    const wrap = document.createElement("div");
-    wrap.className = "turn";
-
-    const h = document.createElement("h3");
-    h.innerHTML = `<span>Turno ${turnIndex}</span><span class="mini muted">${courts()} canchas</span>`;
-
-    const content = document.createElement("div");
-    content.className = "content";
-
-    matches.forEach((m, idx)=>{
-      const courtNum = idx+1;
-      const id = matchId(turnIndex, courtNum);
-      const existing = scores.get(id) || "";
-
-      const div = document.createElement("div");
-      div.className = "court";
-      div.innerHTML = `
-        <div class="muted"><b>Cancha ${courtNum}</b></div>
-        <div>Equipo A: <code>${escapeHtml(formatPair(m.a))}</code></div>
-        <div>Equipo B: <code>${escapeHtml(formatPair(m.b))}</code></div>
-        <div class="scoreRow">
-          <div class="mini muted">Marcador (ej: 6-4 3-6 10-8)</div>
-          <input data-score-id="${id}" placeholder="Marcador..." value="${escapeHtmlAttr(existing)}" />
-        </div>
-      `;
-      content.appendChild(div);
-    });
-
-    wrap.appendChild(h);
-    wrap.appendChild(content);
-    out.appendChild(wrap);
-
-    out.querySelectorAll("input[data-score-id]").forEach(inp=>{
-      inp.addEventListener("input", ()=>{
-        const key = inp.getAttribute("data-score-id");
-        if(!key) return;
-        scores.set(key, inp.value.trim());
-        saveAll();
-      });
-    });
-  }
-
-  function generateTurns(){
-    validateSelectedOrThrow();
-    validateTeamsOrThrow();
-
-    const avoidRepeatPairs = noRepeatPairsEl.value === "yes";
-    const usedPairsA = new Set();
-    const usedPairsB = new Set();
-
-    clearOutput();
-
-    for(let t=1;t<=TURNS;t++){
-      let ok=false;
-      const maxTries=9000;
-
-      for(let attempt=0;attempt<maxTries;attempt++){
-        const pairsA = buildPairs(teamA, avoidRepeatPairs ? usedPairsA : new Set());
-        if(!pairsA) continue;
-        const pairsB = buildPairs(teamB, avoidRepeatPairs ? usedPairsB : new Set());
-        if(!pairsB) continue;
-
-        shuffle(pairsA); shuffle(pairsB);
-
-        const matches=[];
-        for(let i=0;i<courts();i++) matches.push({a:pairsA[i], b:pairsB[i]});
-
-        if(avoidRepeatPairs){
-          for(const m of matches){
-            usedPairsA.add(pairKey(m.a[0], m.a[1]));
-            usedPairsB.add(pairKey(m.b[0], m.b[1]));
-          }
-        }
-
-        addTurnUI(t, matches);
-        ok=true;
-        break;
-      }
-
-      if(!ok) throw new Error(`No pude generar el turno ${t} sin repetir parejas. Prueba “No” o reintenta.`);
-    }
-  }
-
-  // Export
-  function exportCSV(){
-    const rows=[];
-    rows.push(["Turno","Cancha","Pareja A","Pareja B","Marcador"].join(","));
-
-    for(let t=1;t<=TURNS;t++){
-      for(let c=1;c<=courts();c++){
-        const id = matchId(t,c);
-        const score = (scores.get(id)||"").replaceAll('"','""');
-
-        const turnDiv = [...document.querySelectorAll(".turn")].find(x => x.querySelector("h3")?.innerText.includes(`Turno ${t}`));
-        let pairA="", pairB="";
-        if(turnDiv){
-          const courtDiv = [...turnDiv.querySelectorAll(".court")].find(x => x.querySelector("b")?.innerText === `Cancha ${c}`);
-          if(courtDiv){
-            const codes = courtDiv.querySelectorAll("code");
-            pairA = (codes[0]?.innerText || "").replaceAll('"','""');
-            pairB = (codes[1]?.innerText || "").replaceAll('"','""');
-          }
-        }
-        rows.push([t,c,`"${pairA}"`,`"${pairB}"`,`"${score}"`].join(","));
-      }
-    }
-
-    const csv = rows.join("\n");
-    const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "open_padel_turnos.csv";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  function exportPDF(){ window.print(); }
-
-  // Events
-  totalPlayersEl.addEventListener("change", ()=>{
-    // cambiar N -> limpia selección/equipos/turnos, pero NO la base
-    selected = [];
-    teamA = [];
-    teamB = [];
-    scores.clear();
-    clearOutput();
-    saveAll();
-    render();
-    setStatus(status, `Listo: selecciona ${totalPlayers()} jugadores (D:${totalPerSide()} R:${totalPerSide()}) y luego arma A/B.`, "ok");
+/* =========================
+   SUPABASE CONFIG
+========================= */
+const SUPABASE_URL = "https://tuquyruyyizzccxrvafc.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1cXV5cnV5eWl6emNjeHJ2YWZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MTY5NjgsImV4cCI6MjA4MzI5Mjk2OH0.mTsLI_LQC9ccI7Yoc8UL7coGqQlab8NTp3ItFnX7nnE";
+
+const supabase = window.supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY
+);
+
+/* =========================
+   AUTH
+========================= */
+const authStatus = document.getElementById("authStatus");
+const loginBtn = document.getElementById("loginBtn");
+const logoutBtn = document.getElementById("logoutBtn");
+const app = document.getElementById("app");
+
+loginBtn.onclick = async () => {
+  await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo: window.location.href }
   });
+};
 
-  clearSelectionBtn.addEventListener("click", ()=>{
-    selected = [];
-    teamA = [];
-    teamB = [];
-    scores.clear();
-    clearOutput();
-    saveAll();
-    render();
-    setStatus(dbStatus, "Selección limpia.", "ok");
+logoutBtn.onclick = async () => {
+  await supabase.auth.signOut();
+  location.reload();
+};
+
+async function checkSession() {
+  const { data } = await supabase.auth.getSession();
+  if (data.session) {
+    authStatus.textContent = "Sesión iniciada";
+    loginBtn.style.display = "none";
+    logoutBtn.style.display = "inline-block";
+    app.style.display = "block";
+    loadPlayers();
+  } else {
+    authStatus.textContent = "Debes iniciar sesión";
+  }
+}
+checkSession();
+
+/* =========================
+   PLAYERS
+========================= */
+const playersDiv = document.getElementById("players");
+
+async function loadPlayers() {
+  const { data, error } = await supabase
+    .from("players")
+    .select("*")
+    .order("name");
+
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  playersDiv.innerHTML = "";
+  data.forEach(p => {
+    const div = document.createElement("div");
+    div.className = "item";
+    div.innerHTML = `
+      <div>
+        <b>${p.name}</b> (${p.side}) - ${p.rating}
+      </div>
+      <button class="ghost">❌</button>
+    `;
+    div.querySelector("button").onclick = async () => {
+      await supabase.from("players").delete().eq("id", p.id);
+      loadPlayers();
+    };
+    playersDiv.appendChild(div);
   });
+}
 
-  autoTeamsBtn.addEventListener("click", ()=>{
-    try{
-      autoBuildTeamsBalancedFromSelected();
-    }catch(e){
-      setStatus(status, e.message || String(e), "error");
-    }
-  });
+document.getElementById("add").onclick = async () => {
+  const name = document.getElementById("name").value.trim();
+  const side = document.getElementById("side").value;
+  const rating = Number(document.getElementById("rating").value);
 
-  dbAdd.addEventListener("click", ()=>{
-    const name = normalizeName(dbName.value);
-    const side = dbSide.value;
-    const rating = Number(dbRating.value);
+  if (!name) return alert("Nombre requerido");
 
-    if(!name) return setStatus(dbStatus, "Escribe un nombre.", "error");
-    if(nameExists(name)) return setStatus(dbStatus, "Ese nombre ya existe en la base.", "error");
-    if(!Number.isFinite(rating) || rating<1 || rating>10) return setStatus(dbStatus, "Nivel inválido (1–10).", "error");
+  const { error } = await supabase.from("players").insert([
+    { name, side, rating }
+  ]);
 
-    db.push({id: uid(), name, side, rating: Math.round(rating)});
-    dbName.value = "";
-    dbRating.value = "5";
-    saveAll();
-    render();
-    setStatus(dbStatus, "Jugador agregado.", "ok");
-  });
-
-  dbClear.addEventListener("click", ()=>{
-    if(!confirm("¿Borrar TODA la base de jugadores?")) return;
-    db=[];
-    selected=[];
-    teamA=[];
-    teamB=[];
-    scores.clear();
-    clearOutput();
-    saveAll();
-    render();
-    setStatus(dbStatus, "Base borrada.", "ok");
-  });
-
-  dbSearch.addEventListener("input", ()=>renderDB());
-  dbSort.addEventListener("change", ()=>renderDB());
-
-  teamAClear.addEventListener("click", ()=>{
-    teamA.forEach(r=>{
-      if(!selected.some(x=>x.id===r.id)) selected.push({id:r.id});
-    });
-    teamA=[];
-    scores.clear(); clearOutput();
-    saveAll(); render();
-    setStatus(teamAStatus, "A vacío (devuelto al pool).", "ok");
-  });
-
-  teamBClear.addEventListener("click", ()=>{
-    teamB.forEach(r=>{
-      if(!selected.some(x=>x.id===r.id)) selected.push({id:r.id});
-    });
-    teamB=[];
-    scores.clear(); clearOutput();
-    saveAll(); render();
-    setStatus(teamBStatus, "B vacío (devuelto al pool).", "ok");
-  });
-
-  genBtn.addEventListener("click", ()=>{
-    try{
-      generateTurns();
-      setStatus(status, "✅ Turnos generados.", "ok");
-    }catch(e){
-      setStatus(status, e.message || String(e), "error");
-    }
-  });
-
-  exportBtn.addEventListener("click", ()=>{
-    if(!out.innerText.trim()) return setStatus(status, "Primero genera los turnos.", "error");
-    if(exportModeEl.value==="csv") exportCSV();
-    else exportPDF();
-    setStatus(status, "Exportación iniciada.", "ok");
-  });
-
-  copyBtn.addEventListener("click", async ()=>{
-    const text = out.innerText.trim();
-    if(!text) return setStatus(status, "No hay resultado para copiar.", "error");
-    try{
-      await navigator.clipboard.writeText(text);
-      setStatus(status, "Copiado ✅", "ok");
-    }catch{
-      setStatus(status, "No se pudo copiar. Copia manualmente.", "error");
-    }
-  });
-
-  clearAllBtn.addEventListener("click", ()=>{
-    selected=[];
-    teamA=[];
-    teamB=[];
-    scores.clear();
-    clearOutput();
-    saveAll();
-    render();
-    setStatus(status, "Limpio (base se mantiene).", "ok");
-  });
-
-  loadExampleBtn.addEventListener("click", ()=>{
-    db=[];
-    const add = (name, side, rating)=>db.push({id: uid(), name, side, rating});
-    // 24 ejemplo (12D/12R)
-    add("Ana","D",6); add("Majo","D",5); add("Sofi","D",7); add("Vale","D",6);
-    add("Nina","D",6); add("Cami","D",5); add("Kari","D",7); add("Iris","D",6);
-    add("Pia","D",8); add("Lola","D",3); add("Mati","D",9); add("Omar","D",4);
-
-    add("Luis","R",6); add("Pablo","R",5); add("Diego","R",7); add("Juan","R",6);
-    add("Marco","R",6); add("Leo","R",5); add("Fede","R",7); add("Tomas","R",6);
-    add("Sara","R",9); add("Seba","R",3); add("Nico","R",8); add("Rafa","R",4);
-
-    selected=[]; teamA=[]; teamB=[]; scores.clear(); clearOutput();
-    saveAll();
-    render();
-    setStatus(status, "Ejemplo cargado. Elige N y selecciona con checkbox.", "ok");
-  });
-
-  // Init
-  loadAll();
-  render();
-  setStatus(status, `Listo: elige N, selecciona jugadores y arma A/B (auto o manual).`, "ok");
-})();
+  if (error) {
+    alert(error.message);
+  } else {
+    document.getElementById("name").value = "";
+    loadPlayers();
+  }
+};
 </script>
 </body>
 </html>
