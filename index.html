@@ -3,28 +3,30 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Pádel — Equipos A/B | 4 canchas | 3 turnos</title>
+  <title>Open Padel — Equipos A/B (Base + Export)</title>
   <style>
     :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
     body { margin: 0; background: #0b1020; color: #eef2ff; }
-    .wrap { max-width: 1250px; margin: 0 auto; padding: 18px; }
+    .wrap { max-width: 1400px; margin: 0 auto; padding: 18px; }
     h1 { margin: 6px 0 14px; font-size: 20px; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr 1.1fr; gap: 14px; }
+    h2 { margin: 0 0 10px; font-size: 16px; }
+    .grid { display: grid; grid-template-columns: 1.2fr 1fr 1fr 1.2fr; gap: 14px; }
     .card { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 14px; }
     label { display: block; font-size: 12px; opacity: .9; margin-bottom: 6px; }
-    input, select, button, textarea {
+    input, select, button {
       width: 100%; box-sizing: border-box;
       border-radius: 12px; border: 1px solid rgba(255,255,255,.18);
       background: rgba(0,0,0,.25); color: #eef2ff;
       padding: 10px 12px; outline: none;
     }
-    textarea { min-height: 210px; resize: vertical; }
+    input[type="number"] { padding-right: 6px; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .row3 { display: grid; grid-template-columns: 1.2fr .8fr .8fr; gap: 10px; }
     .btns { display: flex; gap: 10px; flex-wrap: wrap; }
     button { cursor: pointer; font-weight: 650; }
     button.primary { background: #4f46e5; border-color: rgba(255,255,255,.2); }
     button.ghost { background: transparent; }
+    button.small { padding: 7px 10px; border-radius: 10px; font-weight: 650; width: auto; }
     .hint { font-size: 12px; opacity: .85; line-height: 1.35; }
     .pill { display: inline-flex; gap: 8px; align-items: center; padding: 6px 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; font-size: 12px; }
     .error { color: #fecaca; }
@@ -33,113 +35,170 @@
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .list { display: grid; gap: 10px; }
     .turn { border: 1px solid rgba(255,255,255,.14); border-radius: 14px; overflow: hidden; }
-    .turn h3 { margin: 0; padding: 10px 12px; background: rgba(255,255,255,.06); font-size: 14px; }
-    .turn .content { padding: 12px; display: grid; gap: 8px; }
-    .court { padding: 10px 12px; border-radius: 12px; background: rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.12); }
-    @media (max-width: 1050px) { .grid { grid-template-columns: 1fr; } textarea { min-height: 160px; } }
+    .turn h3 { margin: 0; padding: 10px 12px; background: rgba(255,255,255,.06); font-size: 14px; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;}
+    .turn .content { padding: 12px; display: grid; gap: 10px; }
+    .court { padding: 10px 12px; border-radius: 12px; background: rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.12); display:grid; gap:6px;}
+    .scoreRow { display:grid; grid-template-columns: 1fr 160px; gap:10px; align-items:center; }
+    .table { display:grid; gap:8px; }
+    .playerRow {
+      display: grid;
+      grid-template-columns: 1.2fr .6fr .6fr auto auto;
+      gap: 8px;
+      align-items: center;
+      padding: 10px 12px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(0,0,0,.18);
+      border-radius: 12px;
+    }
+    .playerRow .name { font-weight: 750; }
+    .badge { display:inline-flex; padding: 3px 8px; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; font-size: 12px; opacity:.95; justify-content:center; }
+    .split { display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; }
+    .mini { font-size: 12px; opacity:.85; }
+    .teamList { display:grid; gap:8px; }
+    .teamItem {
+      display:grid;
+      grid-template-columns: 1fr auto;
+      gap:10px;
+      align-items:center;
+      padding: 10px 12px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(0,0,0,.18);
+      border-radius: 12px;
+    }
+
+    @media (max-width: 1200px) { .grid { grid-template-columns: 1fr; } }
+
+    /* --- Print (PDF) --- */
+    @media print {
+      body { background: white; color: black; }
+      .card { border: 1px solid #ddd; background: white; }
+      button, select, input, .hint, .pill, #controlsCard { display: none !important; }
+      .wrap { max-width: none; padding: 0; }
+      .turn { border: 1px solid #ddd; }
+      .court { border: 1px solid #ddd; background: white; }
+      code { color: black; }
+    }
   </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Pádel: Equipos A vs B • 8 jugadores por equipo (4D/4R) • 4 canchas • 3 turnos</h1>
+  <h1>Open Padel — Base de jugadores • Equipos A/B • 4 canchas • 3 turnos • Export</h1>
 
   <div class="hint" style="margin-bottom:12px;">
-    <span class="pill"><b>Equipo A</b> y <b>Equipo B</b> se arman primero</span>
-    <span class="pill">Cada jugador: <b>Derecha (D)</b> o <b>Revés (R)</b></span>
-    <span class="pill">En cada cancha: pareja A (D+R) vs pareja B (D+R)</span>
-    <span class="pill">Opción: no repetir parejas en turnos</span>
+    <span class="pill">Cada pareja: <b>D + R</b></span>
+    <span class="pill">Cada turno: <b>4 canchas</b> (16 jugadores)</span>
+    <span class="pill">Turnos: <b>3</b></span>
+    <span class="pill">Campos de <b>marcador</b> por cancha</span>
   </div>
 
   <div class="grid">
-    <!-- Equipo A -->
-    <div class="card">
-      <h2 style="margin:0 0  10px;font-size:16px;">Equipo A</h2>
+    <!-- BASE DE JUGADORES -->
+    <div class="card" id="controlsCard">
+      <div class="split">
+        <h2>Base de jugadores</h2>
+        <div class="mini" id="dbCount"></div>
+      </div>
 
       <div class="row3">
         <div>
           <label>Nombre</label>
-          <input id="nameA" placeholder="Ej: Ana" />
+          <input id="dbName" placeholder="Ej: Ana" />
         </div>
         <div>
           <label>Lado</label>
-          <select id="sideA">
+          <select id="dbSide">
             <option value="D">Derecha (D)</option>
             <option value="R">Revés (R)</option>
           </select>
         </div>
         <div>
-          <label>Acción</label>
-          <button class="primary" id="addA">Agregar</button>
+          <label>Puntuación (1–10)</label>
+          <input id="dbRating" type="number" min="1" max="10" value="5" />
         </div>
       </div>
-
-      <div style="height:10px"></div>
-      <label>Jugadores A (8 total)</label>
-      <textarea id="boxA" readonly></textarea>
 
       <div style="height:10px"></div>
       <div class="btns">
-        <button class="ghost" id="clearA">Vaciar A</button>
+        <button class="primary" id="dbAdd">Agregar a base</button>
+        <button class="ghost" id="dbClear">Borrar base</button>
       </div>
 
-      <div id="statusA" class="hint"></div>
-    </div>
-
-    <!-- Equipo B -->
-    <div class="card">
-      <h2 style="margin:0 0 10px;font-size:16px;">Equipo B</h2>
-
-      <div class="row3">
+      <div style="height:12px"></div>
+      <div class="row">
         <div>
-          <label>Nombre</label>
-          <input id="nameB" placeholder="Ej: Luis" />
+          <label>Buscar</label>
+          <input id="dbSearch" placeholder="Escribe para filtrar..." />
         </div>
         <div>
-          <label>Lado</label>
-          <select id="sideB">
-            <option value="D">Derecha (D)</option>
-            <option value="R">Revés (R)</option>
+          <label>Ordenar</label>
+          <select id="dbSort">
+            <option value="name">Nombre</option>
+            <option value="ratingDesc">Puntuación (mayor→menor)</option>
+            <option value="ratingAsc">Puntuación (menor→mayor)</option>
+            <option value="side">Lado (D/R)</option>
           </select>
         </div>
-        <div>
-          <label>Acción</label>
-          <button class="primary" id="addB">Agregar</button>
-        </div>
       </div>
 
-      <div style="height:10px"></div>
-      <label>Jugadores B (8 total)</label>
-      <textarea id="boxB" readonly></textarea>
+      <div style="height:12px"></div>
+      <div class="table" id="dbList"></div>
 
-      <div style="height:10px"></div>
-      <div class="btns">
-        <button class="ghost" id="clearB">Vaciar B</button>
-      </div>
-
-      <div id="statusB" class="hint"></div>
+      <div id="dbStatus" class="hint" style="margin-top:10px;"></div>
     </div>
 
-    <!-- Generación -->
+    <!-- EQUIPO A -->
     <div class="card">
-      <h2 style="margin:0 0 10px;font-size:16px;">Generar turnos</h2>
+      <div class="split">
+        <h2>Equipo A</h2>
+        <div class="mini" id="teamAInfo"></div>
+      </div>
+      <div class="teamList" id="teamAList"></div>
+      <div style="height:10px"></div>
+      <div class="btns">
+        <button class="ghost" id="teamAClear">Vaciar A</button>
+      </div>
+      <div id="teamAStatus" class="hint"></div>
+    </div>
+
+    <!-- EQUIPO B -->
+    <div class="card">
+      <div class="split">
+        <h2>Equipo B</h2>
+        <div class="mini" id="teamBInfo"></div>
+      </div>
+      <div class="teamList" id="teamBList"></div>
+      <div style="height:10px"></div>
+      <div class="btns">
+        <button class="ghost" id="teamBClear">Vaciar B</button>
+      </div>
+      <div id="teamBStatus" class="hint"></div>
+    </div>
+
+    <!-- GENERAR / EXPORT -->
+    <div class="card">
+      <h2>Turnos y exportación</h2>
 
       <div class="row">
         <div>
-          <label>No repetir parejas (A ni B) entre turnos</label>
-          <select id="noRepeat">
+          <label>No repetir parejas (A ni B)</label>
+          <select id="noRepeatPairs">
             <option value="yes" selected>Sí</option>
             <option value="no">No</option>
           </select>
         </div>
         <div>
-          <label>Turnos</label>
-          <input value="3" readonly />
+          <label>Exportar</label>
+          <select id="exportMode">
+            <option value="csv">Excel (CSV)</option>
+            <option value="pdf">PDF (Imprimir)</option>
+          </select>
         </div>
       </div>
 
       <div style="height:10px"></div>
       <div class="btns">
         <button class="primary" id="gen">Generar 3 turnos</button>
+        <button class="ghost" id="export">Exportar</button>
         <button class="ghost" id="copy">Copiar resultado</button>
         <button class="ghost" id="loadExample">Cargar ejemplo</button>
         <button class="ghost" id="clearAll">Limpiar todo</button>
@@ -150,96 +209,315 @@
       <div style="height:12px"></div>
       <label>Resultado</label>
       <div id="out" class="list"></div>
+
+      <div class="hint muted" style="margin-top:12px;">
+        Nota PDF: el botón “PDF” abre impresión; elige <b>Guardar como PDF</b>.
+      </div>
     </div>
   </div>
 </div>
 
 <script>
 (() => {
-  /** @typedef {{name:string, side:'D'|'R'}} Player */
+  /** @typedef {{id:string, name:string, side:'D'|'R', rating:number}} PlayerDB */
+  /** @typedef {{id:string}} TeamMemberRef */
 
+  const TEAM_SIZE = 8;
   const TURNS = 3;
   const COURTS = 4;
-  const TEAM_SIZE = 8;
+
+  const STORE_DB = "open_padel_db_v1";
+  const STORE_TEAMS = "open_padel_teams_v1";
+  const STORE_SCORES = "open_padel_scores_v1"; // by matchId
 
   const $ = (id)=>document.getElementById(id);
 
-  const nameA = $("nameA"), sideA = $("sideA"), addA = $("addA");
-  const nameB = $("nameB"), sideB = $("sideB"), addB = $("addB");
-  const boxA = $("boxA"), boxB = $("boxB");
-  const statusA = $("statusA"), statusB = $("statusB");
-  const clearA = $("clearA"), clearB = $("clearB");
+  // Base UI
+  const dbName = $("dbName");
+  const dbSide = $("dbSide");
+  const dbRating = $("dbRating");
+  const dbAdd = $("dbAdd");
+  const dbClear = $("dbClear");
+  const dbSearch = $("dbSearch");
+  const dbSort = $("dbSort");
+  const dbList = $("dbList");
+  const dbCount = $("dbCount");
+  const dbStatus = $("dbStatus");
 
-  const noRepeatEl = $("noRepeat");
+  // Teams UI
+  const teamAList = $("teamAList");
+  const teamBList = $("teamBList");
+  const teamAInfo = $("teamAInfo");
+  const teamBInfo = $("teamBInfo");
+  const teamAClear = $("teamAClear");
+  const teamBClear = $("teamBClear");
+  const teamAStatus = $("teamAStatus");
+  const teamBStatus = $("teamBStatus");
+
+  // Generator / export
+  const noRepeatPairsEl = $("noRepeatPairs");
+  const exportModeEl = $("exportMode");
   const genBtn = $("gen");
+  const exportBtn = $("export");
   const copyBtn = $("copy");
   const loadExampleBtn = $("loadExample");
   const clearAllBtn = $("clearAll");
   const status = $("status");
   const out = $("out");
 
-  /** @type {Player[]} */ let teamA = [];
-  /** @type {Player[]} */ let teamB = [];
+  /** @type {PlayerDB[]} */ let db = [];
+  /** @type {TeamMemberRef[]} */ let teamA = [];
+  /** @type {TeamMemberRef[]} */ let teamB = [];
+  /** @type {Map<string,string>} */ let scores = new Map(); // matchId -> score string
 
-  function setStatus(el, msg, kind=""){
+  function setStatus(el, msg, kind="") {
     el.className = "hint " + (kind==="error" ? "error" : kind==="ok" ? "ok" : "");
     el.textContent = msg;
   }
 
-  function renderTeams(){
-    boxA.value = teamA.map((p,i)=>`${String(i+1).padStart(2,'0')}. ${p.name} | ${p.side}`).join("\n");
-    boxB.value = teamB.map((p,i)=>`${String(i+1).padStart(2,'0')}. ${p.name} | ${p.side}`).join("\n");
+  function uid() {
+    return Math.random().toString(16).slice(2) + "-" + Date.now().toString(16);
   }
 
-  function clearOutput(){ out.innerHTML = ""; }
+  function saveAll() {
+    try {
+      localStorage.setItem(STORE_DB, JSON.stringify(db));
+      localStorage.setItem(STORE_TEAMS, JSON.stringify({teamA, teamB}));
+      localStorage.setItem(STORE_SCORES, JSON.stringify(Object.fromEntries(scores)));
+    } catch {}
+  }
 
-  function shuffle(arr){
-    for(let i=arr.length-1;i>0;i--){
-      const j = Math.floor(Math.random()*(i+1));
+  function loadAll() {
+    try {
+      const rawDB = localStorage.getItem(STORE_DB);
+      const rawTeams = localStorage.getItem(STORE_TEAMS);
+      const rawScores = localStorage.getItem(STORE_SCORES);
+
+      if (rawDB) db = JSON.parse(rawDB) || [];
+      if (rawTeams) {
+        const t = JSON.parse(rawTeams) || {};
+        teamA = Array.isArray(t.teamA) ? t.teamA : [];
+        teamB = Array.isArray(t.teamB) ? t.teamB : [];
+      }
+      if (rawScores) {
+        const o = JSON.parse(rawScores) || {};
+        scores = new Map(Object.entries(o));
+      }
+    } catch {}
+  }
+
+  function byId(id) { return db.find(p => p.id === id) || null; }
+
+  function countSideRefs(teamRefs, side) {
+    return teamRefs.reduce((acc, r) => {
+      const p = byId(r.id);
+      return acc + (p && p.side === side ? 1 : 0);
+    }, 0);
+  }
+
+  function avgRatingRefs(teamRefs) {
+    const players = teamRefs.map(r => byId(r.id)).filter(Boolean);
+    if (!players.length) return 0;
+    const sum = players.reduce((a,p)=>a+p.rating,0);
+    return Math.round((sum / players.length) * 10) / 10;
+  }
+
+  function isInTeams(playerId) {
+    return teamA.some(r=>r.id===playerId) || teamB.some(r=>r.id===playerId);
+  }
+
+  function validateTeamsOrThrow() {
+    if (teamA.length !== TEAM_SIZE) throw new Error("Equipo A debe tener 8 jugadores.");
+    if (teamB.length !== TEAM_SIZE) throw new Error("Equipo B debe tener 8 jugadores.");
+    if (countSideRefs(teamA,"D") !== 4 || countSideRefs(teamA,"R") !== 4) throw new Error("Equipo A debe tener 4D y 4R.");
+    if (countSideRefs(teamB,"D") !== 4 || countSideRefs(teamB,"R") !== 4) throw new Error("Equipo B debe tener 4D y 4R.");
+  }
+
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
       [arr[i], arr[j]] = [arr[j], arr[i]];
     }
     return arr;
   }
 
-  function uniqueNameExists(name){
-    const n = name.toLowerCase();
-    return teamA.some(p=>p.name.toLowerCase()===n) || teamB.some(p=>p.name.toLowerCase()===n);
+  function pairKey(a, b) {
+    return [a.id, b.id].sort().join("||");
   }
 
-  function countSide(list, side){
-    return list.reduce((acc,p)=>acc+(p.side===side?1:0),0);
+  function formatPlayer(p) {
+    return `${p.name}(${p.side})-${p.rating}`;
   }
 
-  function validateTeam(team, label){
-    if(team.length !== TEAM_SIZE) throw new Error(`${label} debe tener ${TEAM_SIZE} jugadores.`);
-    if(countSide(team,"D") !== 4 || countSide(team,"R") !== 4){
-      throw new Error(`${label} debe tener 4 Derecha (D) y 4 Revés (R).`);
+  function formatPair(pair) {
+    return `${formatPlayer(pair[0])} + ${formatPlayer(pair[1])}`;
+  }
+
+  function renderDB() {
+    const q = dbSearch.value.trim().toLowerCase();
+    const sort = dbSort.value;
+
+    let items = db.slice().filter(p => p.name.toLowerCase().includes(q));
+
+    if (sort === "name") items.sort((a,b)=>a.name.localeCompare(b.name));
+    if (sort === "ratingDesc") items.sort((a,b)=>b.rating - a.rating || a.name.localeCompare(b.name));
+    if (sort === "ratingAsc") items.sort((a,b)=>a.rating - b.rating || a.name.localeCompare(b.name));
+    if (sort === "side") items.sort((a,b)=>a.side.localeCompare(b.side) || a.name.localeCompare(b.name));
+
+    dbCount.textContent = `${db.length} en base`;
+
+    dbList.innerHTML = "";
+    for (const p of items) {
+      const row = document.createElement("div");
+      row.className = "playerRow";
+
+      const inTeam = isInTeams(p.id);
+      row.innerHTML = `
+        <div>
+          <div class="name">${p.name}</div>
+          <div class="mini muted">ID: ${p.id.slice(0,6)} • ${inTeam ? "En equipos" : "Disponible"}</div>
+        </div>
+        <div class="badge">${p.side}</div>
+        <div class="badge">${p.rating}</div>
+        <button class="ghost small" data-act="edit" data-id="${p.id}">Editar</button>
+        <button class="primary small" data-act="addA" data-id="${p.id}">+ A</button>
+      `;
+      // Si ya está en equipos, deshabilito add
+      if (inTeam) {
+        row.querySelector('[data-act="addA"]').textContent = "En equipo";
+        row.querySelector('[data-act="addA"]').classList.remove("primary");
+        row.querySelector('[data-act="addA"]').classList.add("ghost");
+        row.querySelector('[data-act="addA"]').disabled = true;
+      }
+      dbList.appendChild(row);
     }
+
+    // Eventos de filas
+    dbList.querySelectorAll("button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const act = btn.getAttribute("data-act");
+        const id = btn.getAttribute("data-id");
+        if (!id) return;
+        if (act === "edit") openEdit(id);
+        if (act === "addA") addToTeam("A", id);
+      });
+    });
   }
 
-  function pairKey(a,b){ return [a.name,b.name].sort().join("||"); }
-  function formatPlayer(p){ return `${p.name}(${p.side})`; }
-  function formatPair(pair){ return `${formatPlayer(pair[0])} + ${formatPlayer(pair[1])}`; }
+  function renderTeams() {
+    function renderTeam(listEl, teamRefs, label) {
+      listEl.innerHTML = "";
+      for (const r of teamRefs) {
+        const p = byId(r.id);
+        if (!p) continue;
+        const item = document.createElement("div");
+        item.className = "teamItem";
+        item.innerHTML = `
+          <div>
+            <div><b>${p.name}</b> <span class="badge">${p.side}</span> <span class="badge">${p.rating}</span></div>
+            <div class="mini muted">${label}</div>
+          </div>
+          <button class="ghost small" data-id="${p.id}">Quitar</button>
+        `;
+        item.querySelector("button").addEventListener("click", () => {
+          if (label === "Equipo A") teamA = teamA.filter(x=>x.id!==p.id);
+          else teamB = teamB.filter(x=>x.id!==p.id);
+          saveAll();
+          render();
+        });
+        listEl.appendChild(item);
+      }
+    }
 
-  // Backtracking para emparejar D+R dentro del equipo evitando parejas usadas
-  function buildPairs(teamPlayers, usedPairs){
-    const rights = shuffle(teamPlayers.filter(p=>p.side==="D").slice());
-    const lefts  = teamPlayers.filter(p=>p.side==="R").slice();
-    if(rights.length !== lefts.length) return null;
+    renderTeam(teamAList, teamA, "Equipo A");
+    renderTeam(teamBList, teamB, "Equipo B");
 
-    /** @type {[Player,Player][]} */ const result = [];
+    teamAInfo.textContent = `${teamA.length}/8 • D:${countSideRefs(teamA,"D")} R:${countSideRefs(teamA,"R")} • prom:${avgRatingRefs(teamA)}`;
+    teamBInfo.textContent = `${teamB.length}/8 • D:${countSideRefs(teamB,"D")} R:${countSideRefs(teamB,"R")} • prom:${avgRatingRefs(teamB)}`;
+  }
 
-    function backtrack(i, remainingLefts){
-      if(i === rights.length) return true;
+  function render() {
+    renderDB();
+    renderTeams();
+  }
+
+  function addToTeam(team, playerId) {
+    const p = byId(playerId);
+    if (!p) return;
+
+    if (isInTeams(playerId)) {
+      setStatus(dbStatus, "Ese jugador ya está en un equipo.", "error");
+      return;
+    }
+
+    if (team === "A") {
+      if (teamA.length >= TEAM_SIZE) return setStatus(teamAStatus, "Equipo A ya tiene 8.", "error");
+      teamA.push({id: playerId});
+      setStatus(teamAStatus, "Agregado a A.", "ok");
+    } else {
+      if (teamB.length >= TEAM_SIZE) return setStatus(teamBStatus, "Equipo B ya tiene 8.", "error");
+      teamB.push({id: playerId});
+      setStatus(teamBStatus, "Agregado a B.", "ok");
+    }
+    saveAll();
+    render();
+  }
+
+  // Edit modal simple usando prompt (mantiene el archivo 1 solo)
+  function openEdit(playerId) {
+    const p = byId(playerId);
+    if (!p) return;
+
+    const newName = prompt("Editar nombre:", p.name);
+    if (newName === null) return;
+
+    const nameTrim = newName.trim();
+    if (!nameTrim) return setStatus(dbStatus, "Nombre inválido.", "error");
+
+    // Evitar duplicados de nombre (case-insensitive) con otros ids
+    const exists = db.some(x => x.id !== p.id && x.name.toLowerCase() === nameTrim.toLowerCase());
+    if (exists) return setStatus(dbStatus, "Ya existe otro jugador con ese nombre.", "error");
+
+    const newSide = prompt("Editar lado (D o R):", p.side);
+    if (newSide === null) return;
+    const s = newSide.trim().toUpperCase();
+    if (s !== "D" && s !== "R") return setStatus(dbStatus, "Lado inválido: usa D o R.", "error");
+
+    const newRatingStr = prompt("Editar puntuación (1-10):", String(p.rating));
+    if (newRatingStr === null) return;
+    const n = Number(newRatingStr);
+    if (!Number.isFinite(n) || n < 1 || n > 10) return setStatus(dbStatus, "Puntuación inválida (1–10).", "error");
+
+    // Actualizar
+    db = db.map(x => x.id === p.id ? ({...x, name: nameTrim, side: /** @type any */(s), rating: Math.round(n)}) : x);
+    saveAll();
+    render();
+    setStatus(dbStatus, "Jugador actualizado.", "ok");
+  }
+
+  // ------ Generación de turnos (parejas D+R) ------
+  function buildPairs(teamRefs, usedPairs) {
+    const players = teamRefs.map(r => byId(r.id)).filter(Boolean);
+
+    const rights = shuffle(players.filter(p=>p.side==="D").slice());
+    const lefts  = players.filter(p=>p.side==="R").slice();
+    if (rights.length !== lefts.length) return null;
+
+    /** @type {[PlayerDB,PlayerDB][]} */ const result = [];
+
+    function backtrack(i, remainingLefts) {
+      if (i === rights.length) return true;
       const r = rights[i];
+
       const idxs = shuffle([...Array(remainingLefts.length).keys()]);
-      for(const j of idxs){
+      for (const j of idxs) {
         const l = remainingLefts[j];
-        if(usedPairs.has(pairKey(r,l))) continue;
+        const k = pairKey(r, l);
+        if (usedPairs.has(k)) continue;
 
         result.push([r,l]);
         const next = remainingLefts.slice(0,j).concat(remainingLefts.slice(j+1));
-        if(backtrack(i+1, next)) return true;
+        if (backtrack(i+1, next)) return true;
         result.pop();
       }
       return false;
@@ -248,155 +526,276 @@
     return backtrack(0, lefts) ? result : null;
   }
 
-  function addTurnUI(turnIndex, matches){
+  function clearOutput() { out.innerHTML = ""; }
+
+  function matchId(turn, court) { return `T${turn}-C${court}`; }
+
+  function addTurnUI(turnIndex, matches) {
     const wrap = document.createElement("div");
     wrap.className = "turn";
+
     const h = document.createElement("h3");
-    h.textContent = `Turno ${turnIndex}`;
+    h.innerHTML = `<span>Turno ${turnIndex}</span><span class="mini muted">4 canchas</span>`;
     const content = document.createElement("div");
     content.className = "content";
 
-    matches.forEach((m, i)=>{
+    matches.forEach((m, idx) => {
+      const courtNum = idx + 1;
+      const id = matchId(turnIndex, courtNum);
+      const existing = scores.get(id) || "";
+
       const div = document.createElement("div");
       div.className = "court";
-      div.innerHTML = `<div class="muted"><b>Cancha ${i+1}</b></div>
+      div.innerHTML = `
+        <div class="muted"><b>Cancha ${courtNum}</b></div>
         <div>Equipo A: <code>${formatPair(m.a)}</code></div>
-        <div>Equipo B: <code>${formatPair(m.b)}</code></div>`;
+        <div>Equipo B: <code>${formatPair(m.b)}</code></div>
+        <div class="scoreRow">
+          <div class="mini muted">Marcador (ej: 6-4 3-6 10-8)</div>
+          <input data-score-id="${id}" placeholder="Marcador..." value="${escapeHtml(existing)}" />
+        </div>
+      `;
       content.appendChild(div);
     });
 
     wrap.appendChild(h);
     wrap.appendChild(content);
     out.appendChild(wrap);
+
+    // listeners score inputs
+    out.querySelectorAll("input[data-score-id]").forEach(inp => {
+      inp.addEventListener("input", () => {
+        const key = inp.getAttribute("data-score-id");
+        if (!key) return;
+        scores.set(key, inp.value.trim());
+        saveAll();
+      });
+    });
   }
 
-  function makeTurn(avoidRepeat, usedPairsA, usedPairsB){
-    const maxTries = 5000;
-    for(let t=0;t<maxTries;t++){
-      const pairsA = buildPairs(teamA, avoidRepeat ? usedPairsA : new Set());
-      if(!pairsA) continue;
-      const pairsB = buildPairs(teamB, avoidRepeat ? usedPairsB : new Set());
-      if(!pairsB) continue;
-
-      shuffle(pairsA); shuffle(pairsB);
-
-      const matches = [];
-      for(let i=0;i<COURTS;i++){
-        matches.push({a:pairsA[i], b:pairsB[i]});
-      }
-
-      if(avoidRepeat){
-        for(const m of matches){
-          usedPairsA.add(pairKey(m.a[0], m.a[1]));
-          usedPairsB.add(pairKey(m.b[0], m.b[1]));
-        }
-      }
-      return matches;
-    }
-    return null;
+  function escapeHtml(s) {
+    return (s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
   }
 
-  // ----- Actions -----
-  addA.addEventListener("click", ()=>{
-    const n = nameA.value.trim();
-    if(!n) return setStatus(statusA, "Escribe un nombre.", "error");
-    if(uniqueNameExists(n)) return setStatus(statusA, "Ese jugador ya está en A o B.", "error");
-    if(teamA.length >= TEAM_SIZE) return setStatus(statusA, "Equipo A ya tiene 8 jugadores.", "error");
+  function generateTurns() {
+    validateTeamsOrThrow();
 
-    teamA.push({name:n, side: sideA.value});
-    nameA.value = "";
-    renderTeams();
-    setStatus(statusA, `Agregado (${teamA.length}/8).`, "ok");
-  });
+    const avoidRepeatPairs = noRepeatPairsEl.value === "yes";
+    const usedPairsA = new Set();
+    const usedPairsB = new Set();
 
-  addB.addEventListener("click", ()=>{
-    const n = nameB.value.trim();
-    if(!n) return setStatus(statusB, "Escribe un nombre.", "error");
-    if(uniqueNameExists(n)) return setStatus(statusB, "Ese jugador ya está en A o B.", "error");
-    if(teamB.length >= TEAM_SIZE) return setStatus(statusB, "Equipo B ya tiene 8 jugadores.", "error");
-
-    teamB.push({name:n, side: sideB.value});
-    nameB.value = "";
-    renderTeams();
-    setStatus(statusB, `Agregado (${teamB.length}/8).`, "ok");
-  });
-
-  clearA.addEventListener("click", ()=>{
-    teamA = [];
-    renderTeams();
-    setStatus(statusA, "Equipo A vacío.", "ok");
-  });
-
-  clearB.addEventListener("click", ()=>{
-    teamB = [];
-    renderTeams();
-    setStatus(statusB, "Equipo B vacío.", "ok");
-  });
-
-  clearAllBtn.addEventListener("click", ()=>{
-    teamA = []; teamB = [];
-    renderTeams();
     clearOutput();
-    setStatus(status, "Todo limpio.", "ok");
-    setStatus(statusA, "", ""); setStatus(statusB, "", "");
-  });
 
-  loadExampleBtn.addEventListener("click", ()=>{
-    teamA = [
-      {name:"Ana", side:"D"},{name:"Majo", side:"D"},{name:"Sofi", side:"D"},{name:"Vale", side:"D"},
-      {name:"Luis", side:"R"},{name:"Pablo", side:"R"},{name:"Diego", side:"R"},{name:"Juan", side:"R"},
-    ];
-    teamB = [
-      {name:"Nina", side:"D"},{name:"Cami", side:"D"},{name:"Kari", side:"D"},{name:"Iris", side:"D"},
-      {name:"Marco", side:"R"},{name:"Leo", side:"R"},{name:"Fede", side:"R"},{name:"Tomas", side:"R"},
-    ];
-    renderTeams();
-    clearOutput();
-    setStatus(status, "Ejemplo cargado. Ahora genera.", "ok");
-    setStatus(statusA, "", ""); setStatus(statusB, "", "");
-  });
+    for (let t = 1; t <= TURNS; t++) {
+      let ok = false;
+      const maxTries = 7000;
 
-  genBtn.addEventListener("click", ()=>{
-    clearOutput();
-    const avoidRepeat = noRepeatEl.value === "yes";
+      for (let attempt = 0; attempt < maxTries; attempt++) {
+        const pairsA = buildPairs(teamA, avoidRepeatPairs ? usedPairsA : new Set());
+        if (!pairsA) continue;
+        const pairsB = buildPairs(teamB, avoidRepeatPairs ? usedPairsB : new Set());
+        if (!pairsB) continue;
 
-    try{
-      validateTeam(teamA, "Equipo A");
-      validateTeam(teamB, "Equipo B");
+        shuffle(pairsA); shuffle(pairsB);
 
-      const usedPairsA = new Set();
-      const usedPairsB = new Set();
-
-      for(let t=1;t<=TURNS;t++){
-        const matches = makeTurn(avoidRepeat, usedPairsA, usedPairsB);
-        if(!matches){
-          throw new Error(
-            `No pude generar el turno ${t} sin repetir parejas. ` +
-            `Presiona "Generar" otra vez (hay aleatoriedad) o desactiva la regla.`
-          );
+        const matches = [];
+        for (let i = 0; i < COURTS; i++) {
+          matches.push({a: pairsA[i], b: pairsB[i]});
         }
+
+        if (avoidRepeatPairs) {
+          for (const m of matches) {
+            usedPairsA.add(pairKey(m.a[0], m.a[1]));
+            usedPairsB.add(pairKey(m.b[0], m.b[1]));
+          }
+        }
+
         addTurnUI(t, matches);
+        ok = true;
+        break;
       }
 
-      setStatus(status, "✅ Generado: 3 turnos, 4 canchas (A vs B).", "ok");
-    }catch(e){
+      if (!ok) {
+        throw new Error(`No pude generar el turno ${t} con la regla de no repetir parejas. Prueba “No” o vuelve a intentar.`);
+      }
+    }
+  }
+
+  // ------ Export ------
+  function exportCSV() {
+    // Lee lo que hay en pantalla (turnos + canchas) desde el DOM
+    const rows = [];
+    rows.push(["Turno","Cancha","Pareja A","Pareja B","Marcador"].join(","));
+
+    for (let t = 1; t <= TURNS; t++) {
+      for (let c = 1; c <= COURTS; c++) {
+        const id = matchId(t,c);
+        const score = (scores.get(id) || "").replaceAll('"','""');
+        // Extraer texto desde el DOM si existe
+        const turnDiv = [...document.querySelectorAll(".turn")].find(x => x.querySelector("h3")?.innerText.includes(`Turno ${t}`));
+        let pairA = "", pairB = "";
+        if (turnDiv) {
+          const courtDiv = [...turnDiv.querySelectorAll(".court")].find(x => x.querySelector("b")?.innerText === `Cancha ${c}`);
+          if (courtDiv) {
+            const lines = courtDiv.querySelectorAll("code");
+            pairA = (lines[0]?.innerText || "").replaceAll('"','""');
+            pairB = (lines[1]?.innerText || "").replaceAll('"','""');
+          }
+        }
+        rows.push([t,c,`"${pairA}"`,`"${pairB}"`,`"${score}"`].join(","));
+      }
+    }
+
+    const csv = rows.join("\n");
+    const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "open_padel_turnos.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportPDF() {
+    // Usa impresión: en el diálogo eliges “Guardar como PDF”
+    window.print();
+  }
+
+  // ------ Events ------
+  dbAdd.addEventListener("click", () => {
+    const name = dbName.value.trim();
+    const side = dbSide.value;
+    const rating = Number(dbRating.value);
+
+    if (!name) return setStatus(dbStatus, "Escribe un nombre.", "error");
+    if (!Number.isFinite(rating) || rating < 1 || rating > 10) return setStatus(dbStatus, "Puntuación inválida (1–10).", "error");
+
+    const exists = db.some(p => p.name.toLowerCase() === name.toLowerCase());
+    if (exists) return setStatus(dbStatus, "Ese nombre ya existe en la base.", "error");
+
+    db.push({id: uid(), name, side, rating: Math.round(rating)});
+    dbName.value = "";
+    dbRating.value = "5";
+    saveAll();
+    render();
+    setStatus(dbStatus, "Jugador agregado a la base.", "ok");
+  });
+
+  dbClear.addEventListener("click", () => {
+    if (!confirm("¿Borrar TODA la base de jugadores?")) return;
+    db = [];
+    teamA = [];
+    teamB = [];
+    scores.clear();
+    saveAll();
+    render();
+    clearOutput();
+    setStatus(dbStatus, "Base borrada.", "ok");
+    setStatus(status, "Todo limpio.", "ok");
+  });
+
+  dbSearch.addEventListener("input", renderDB);
+  dbSort.addEventListener("change", renderDB);
+
+  teamAClear.addEventListener("click", () => {
+    teamA = [];
+    saveAll(); render();
+    setStatus(teamAStatus, "Equipo A vacío.", "ok");
+  });
+
+  teamBClear.addEventListener("click", () => {
+    teamB = [];
+    saveAll(); render();
+    setStatus(teamBStatus, "Equipo B vacío.", "ok");
+  });
+
+  genBtn.addEventListener("click", () => {
+    try {
+      generateTurns();
+      setStatus(status, "✅ Turnos generados. Escribe marcadores y exporta cuando quieras.", "ok");
+    } catch (e) {
       setStatus(status, e.message || String(e), "error");
     }
   });
 
-  copyBtn.addEventListener("click", async ()=>{
+  exportBtn.addEventListener("click", () => {
+    const mode = exportModeEl.value;
+    if (!out.innerText.trim()) return setStatus(status, "Primero genera los turnos.", "error");
+    if (mode === "csv") exportCSV();
+    else exportPDF();
+    setStatus(status, "Exportación iniciada.", "ok");
+  });
+
+  copyBtn.addEventListener("click", async () => {
     const text = out.innerText.trim();
-    if(!text) return setStatus(status, "No hay resultado para copiar.", "error");
-    try{
+    if (!text) return setStatus(status, "No hay resultado para copiar.", "error");
+    try {
       await navigator.clipboard.writeText(text);
-      setStatus(status, "Resultado copiado ✅", "ok");
-    }catch{
-      setStatus(status, "No se pudo copiar. Selecciona el texto y cópialo manualmente.", "error");
+      setStatus(status, "Copiado ✅", "ok");
+    } catch {
+      setStatus(status, "No se pudo copiar. Selecciona y copia manualmente.", "error");
     }
   });
 
-  renderTeams();
-  setStatus(status, "Tip: usa 'Cargar ejemplo' para probar rápido.", "ok");
+  clearAllBtn.addEventListener("click", () => {
+    teamA = [];
+    teamB = [];
+    scores.clear();
+    saveAll();
+    render();
+    clearOutput();
+    setStatus(status, "Equipos y marcadores borrados (la base se mantiene).", "ok");
+  });
+
+  loadExampleBtn.addEventListener("click", () => {
+    // Carga base con 16 (8D/8R) con rating ejemplo, y arma equipos A/B 4D/4R
+    db = [
+      {id:uid(), name:"Ana", side:"D", rating:6},{id:uid(), name:"Majo", side:"D", rating:5},
+      {id:uid(), name:"Sofi", side:"D", rating:7},{id:uid(), name:"Vale", side:"D", rating:6},
+      {id:uid(), name:"Luis", side:"R", rating:6},{id:uid(), name:"Pablo", side:"R", rating:5},
+      {id:uid(), name:"Diego", side:"R", rating:7},{id:uid(), name:"Juan", side:"R", rating:6},
+
+      {id:uid(), name:"Nina", side:"D", rating:6},{id:uid(), name:"Cami", side:"D", rating:5},
+      {id:uid(), name:"Kari", side:"D", rating:7},{id:uid(), name:"Iris", side:"D", rating:6},
+      {id:uid(), name:"Marco", side:"R", rating:6},{id:uid(), name:"Leo", side:"R", rating:5},
+      {id:uid(), name:"Fede", side:"R", rating:7},{id:uid(), name:"Tomas", side:"R", rating:6},
+    ];
+    // Equipos A: primeros 8 de arriba, B: segundos 8 (ya son 4D/4R por equipo)
+    teamA = db.slice(0,8).map(p=>({id:p.id}));
+    teamB = db.slice(8,16).map(p=>({id:p.id}));
+
+    scores.clear();
+    saveAll();
+    render();
+    clearOutput();
+    setStatus(status, "Ejemplo cargado. Genera turnos.", "ok");
+    setStatus(dbStatus, "", "");
+  });
+
+  // Botones rápidos: +B desde base (Shift+click en +A)
+  dbList.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button");
+    if (!btn) return;
+    const act = btn.getAttribute("data-act");
+    const id = btn.getAttribute("data-id");
+    if (!id || act !== "addA") return;
+
+    // Si el usuario mantiene Shift, manda a B
+    if (ev.shiftKey) {
+      addToTeam("B", id);
+      ev.preventDefault();
+      ev.stopPropagation();
+    }
+  }, true);
+
+  // Tip visible
+  setStatus(dbStatus, "Tip: en la base, clic en “+ A”. Si mantienes SHIFT al hacer clic, lo agrega a B.", "ok");
+
+  // Init
+  loadAll();
+  render();
 })();
 </script>
 </body>
