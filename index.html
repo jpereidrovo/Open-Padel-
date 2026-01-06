@@ -50,7 +50,6 @@
 
     .table { display:grid; gap:8px; }
 
-    /* db row: checkbox + name + side + rating + toA + toB */
     .dbRow {
       display: grid;
       grid-template-columns: auto 1.2fr .55fr .55fr auto auto;
@@ -90,7 +89,6 @@
 
     @media (max-width: 1200px) { .grid { grid-template-columns: 1fr; } }
 
-    /* Print (PDF) */
     @media print {
       body { background: white; color: black; }
       .card { border: 1px solid #ddd; background: white; }
@@ -470,12 +468,7 @@
   async function loadDBFromSupabase() {
     const { data, error } = await sb.from("players").select("*").order("name");
     if (error) throw error;
-    db = (data || []).map(x => ({
-      id: x.id,
-      name: x.name,
-      side: x.side,
-      rating: x.rating
-    }));
+    db = (data || []).map(x => ({ id: x.id, name: x.name, side: x.side, rating: x.rating }));
   }
 
   async function addPlayerToSupabase(name, side, rating) {
@@ -485,11 +478,6 @@
 
   async function updatePlayerInSupabase(id, patch) {
     const { error } = await sb.from("players").update(patch).eq("id", id);
-    if (error) throw error;
-  }
-
-  async function deletePlayerInSupabase(id) {
-    const { error } = await sb.from("players").delete().eq("id", id);
     if (error) throw error;
   }
 
@@ -554,7 +542,6 @@
       const isSel = selected.some(r=>r.id===p.id);
       const isInTeams = teamA.some(r=>r.id===p.id) || teamB.some(r=>r.id===p.id);
 
-      // checkbox rules: cannot exceed total N or exceed D/R requirement
       const dNow = countSide(selected,"D");
       const rNow = countSide(selected,"R");
       const wouldBeD = p.side==="D" ? dNow+ (isSel?0:1) : dNow;
@@ -589,7 +576,6 @@
       dbList.appendChild(row);
     }
 
-    // Checkbox select/deselect
     dbList.querySelectorAll("input.pickCb").forEach(cb=>{
       cb.addEventListener("change", ()=>{
         const id = cb.getAttribute("data-id");
@@ -632,7 +618,6 @@
       });
     });
 
-    // Edit name (on blur)
     dbList.querySelectorAll("input.nameInp").forEach(inp=>{
       const apply = async ()=>{
         const id = inp.getAttribute("data-id");
@@ -645,7 +630,6 @@
           inp.value = normalizeName(original.name);
           return setStatus(dbStatus, "Nombre inválido (vacío).", "error");
         }
-        // prevent duplicates locally (Supabase also enforces)
         const nlow = newName.toLowerCase();
         if(db.some(p => p.id!==id && normalizeName(p.name).toLowerCase() === nlow)){
           inp.value = normalizeName(original.name);
@@ -672,7 +656,6 @@
       });
     });
 
-    // Edit side inline
     dbList.querySelectorAll("select.sideSel").forEach(sel=>{
       sel.addEventListener("change", async ()=>{
         const id = sel.getAttribute("data-id");
@@ -680,7 +663,6 @@
         const v = sel.value.toUpperCase();
         if(v!=="D" && v!=="R") return;
 
-        // If selected, block if would break selection limits (D/R)
         const isSel = selected.some(r=>r.id===id);
         if(isSel){
           const dNow = countSide(selected,"D");
@@ -713,7 +695,6 @@
       });
     });
 
-    // Edit rating inline
     dbList.querySelectorAll("input.ratingInp").forEach(inp=>{
       inp.addEventListener("change", async ()=>{
         const id = inp.getAttribute("data-id");
@@ -735,7 +716,6 @@
       });
     });
 
-    // Move to A/B
     dbList.querySelectorAll("button").forEach(btn=>{
       btn.addEventListener("click", ()=>{
         const act = btn.getAttribute("data-act");
@@ -870,156 +850,10 @@
       throw new Error(`Equipo B debe tener ${perTeamSide()}D y ${perTeamSide()}R.`);
   }
 
-  // Autoarmado balanceado por nivel (simple y efectivo) desde la selección total
-  function shuffle(arr){
-    for(let i=arr.length-1;i>0;i--){
-      const j = Math.floor(Math.random()*(i+1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
-  }
-
+  // ==========================================================
+  // AUTOARMADO MEJORADO (SEED TOP + GREEDY + SWAPS)
+  // ==========================================================
   function autoBuildTeamsBalancedFromSelected(){
-  const allIds = new Set([
-    ...selected.map(r=>r.id),
-    ...teamA.map(r=>r.id),
-    ...teamB.map(r=>r.id),
-  ]);
-
-  if(allIds.size !== totalPlayers()) throw new Error(`Selecciona exactamente ${totalPlayers()} jugadores antes de autoarmar.`);
-
-  const players = [...allIds].map(id=>byId(id)).filter(Boolean);
-  const needPerSide = totalPerSide();        // total D y total R en la selección
-  const needPerTeamSide = perTeamSide();     // D y R por equipo
-
-  const Ds = players.filter(p=>p.side==="D").slice().sort((a,b)=>b.rating-a.rating);
-  const Rs = players.filter(p=>p.side==="R").slice().sort((a,b)=>b.rating-a.rating);
-
-  if(Ds.length !== needPerSide || Rs.length !== needPerSide){
-    throw new Error(`Los ${totalPlayers()} seleccionados deben tener ${needPerSide}D y ${needPerSide}R.`);
-  }
-
-  // Helpers de sumas y cupos
-  const A = [], B = [];
-  let sumA = 0, sumB = 0;
-  let aD = 0, aR = 0, bD = 0, bR = 0;
-
-  function canAdd(team, p){
-    if(team === "A"){
-      if(p.side==="D") return aD < needPerTeamSide;
-      return aR < needPerTeamSide;
-    } else {
-      if(p.side==="D") return bD < needPerTeamSide;
-      return bR < needPerTeamSide;
-    }
-  }
-  function add(team, p){
-    if(team==="A"){
-      A.push(p); sumA += p.rating;
-      if(p.side==="D") aD++; else aR++;
-    } else {
-      B.push(p); sumB += p.rating;
-      if(p.side==="D") bD++; else bR++;
-    }
-  }
-
-  // 1) SEED: top 2 D y top 2 R, uno en cada equipo
-  // Idea: repartir #1 y #2 para evitar que un equipo se lleve todas las “bestias”.
-  // D
-  add("A", Ds[0]);
-  add("B", Ds[1]);
-  // R
-  add("A", Rs[0]);
-  add("B", Rs[1]);
-
-  const restD = Ds.slice(2);
-  const restR = Rs.slice(2);
-
-  // 2) Asignación greedy: el siguiente más fuerte va al equipo que deje sumas más parejas,
-  // respetando cupos.
-  function greedyFill(list){
-    for(const p of list){
-      const tryA = canAdd("A", p);
-      const tryB = canAdd("B", p);
-
-      if(!tryA && !tryB){
-        throw new Error("No hay cupo en A/B para asignar (revisa selección).");
-      } else if(tryA && !tryB){
-        add("A", p);
-      } else if(!tryA && tryB){
-        add("B", p);
-      } else {
-        // ambos posibles: decide por mínima diferencia de sumas
-        const diffIfA = Math.abs((sumA + p.rating) - sumB);
-        const diffIfB = Math.abs(sumA - (sumB + p.rating));
-        if(diffIfA < diffIfB) add("A", p);
-        else if(diffIfB < diffIfA) add("B", p);
-        else {
-          // empate: manda al equipo con menor suma actual
-          if(sumA <= sumB) add("A", p); else add("B", p);
-        }
-      }
-    }
-  }
-
-  // Llenar primero con los ratings más altos para controlar mejor el balance
-  greedyFill(restD);   // derechos
-  greedyFill(restR);   // reveses
-
-  // 3) OPTIMIZACIÓN final (swap local) para bajar todavía más la diferencia
-  // Solo swaps dentro del mismo lado (D<->D, R<->R) para no romper el cupo.
-  function improveSwaps(side){
-    let improved = true;
-    let loops = 0;
-    while(improved && loops < 400){ // límite para no colgar
-      loops++;
-      improved = false;
-      const aList = A.filter(x=>x.side===side);
-      const bList = B.filter(x=>x.side===side);
-
-      const baseDiff = Math.abs(sumA - sumB);
-      for(const pa of aList){
-        for(const pb of bList){
-          // si swap pa<->pb
-          const newSumA = sumA - pa.rating + pb.rating;
-          const newSumB = sumB - pb.rating + pa.rating;
-          const newDiff = Math.abs(newSumA - newSumB);
-          if(newDiff < baseDiff){
-            // aplicar swap
-            const ia = A.findIndex(x=>x.id===pa.id);
-            const ib = B.findIndex(x=>x.id===pb.id);
-            A[ia] = pb; B[ib] = pa;
-            sumA = newSumA; sumB = newSumB;
-            improved = true;
-            break;
-          }
-        }
-        if(improved) break;
-      }
-    }
-  }
-
-  improveSwaps("D");
-  improveSwaps("R");
-
-  // Exportar a estado de la app
-  teamA = A.map(p=>({id:p.id}));
-  teamB = B.map(p=>({id:p.id}));
-  selected = [];
-
-  scores.clear();
-  clearOutput();
-  saveLocalState();
-  render();
-
-  // Info final
-  const avgA = Math.round((sumA / A.length) * 100) / 100;
-  const avgB = Math.round((sumB / B.length) * 100) / 100;
-  const diff = Math.round(Math.abs(avgA - avgB) * 100) / 100;
-
-  setStatus(status, `✅ Autoarmado mejorado: prom A=${avgA} • prom B=${avgB} • Δ=${diff}`, diff <= 0.2 ? "ok" : (diff <= 0.5 ? "warn" : "error"));
-}
-
     const allIds = new Set([
       ...selected.map(r=>r.id),
       ...teamA.map(r=>r.id),
@@ -1032,32 +866,100 @@
     const needPerSide = totalPerSide();
     const needPerTeamSide = perTeamSide();
 
-    const rights = players.filter(p=>p.side==="D").slice().sort((a,b)=>b.rating-a.rating);
-    const lefts  = players.filter(p=>p.side==="R").slice().sort((a,b)=>b.rating-a.rating);
+    const Ds = players.filter(p=>p.side==="D").slice().sort((a,b)=>b.rating-a.rating);
+    const Rs = players.filter(p=>p.side==="R").slice().sort((a,b)=>b.rating-a.rating);
 
-    if(rights.length !== needPerSide || lefts.length !== needPerSide){
+    if(Ds.length !== needPerSide || Rs.length !== needPerSide){
       throw new Error(`Los ${totalPlayers()} seleccionados deben tener ${needPerSide}D y ${needPerSide}R.`);
     }
+    if(needPerTeamSide < 1) throw new Error("Cantidad inválida para autoarmar.");
 
-    function splitBalanced(list, countPerTeam){
-      const hi = list.slice(0, countPerTeam).slice();          // top
-      const lo = list.slice(countPerTeam).slice().reverse();   // bottom
-      const merged = [];
-      for(let i=0;i<countPerTeam;i++){
-        merged.push(hi[i]);
-        merged.push(lo[i]);
+    // Equipos temporales con sumas
+    const A=[], B=[];
+    let sumA=0, sumB=0;
+    let aD=0,aR=0,bD=0,bR=0;
+
+    function canAdd(team, p){
+      if(team==="A"){
+        if(p.side==="D") return aD < needPerTeamSide;
+        return aR < needPerTeamSide;
+      } else {
+        if(p.side==="D") return bD < needPerTeamSide;
+        return bR < needPerTeamSide;
       }
-      const a=[], b=[];
-      merged.forEach((p, idx)=> (idx%2===0 ? a : b).push(p));
-      return {a, b};
+    }
+    function add(team, p){
+      if(team==="A"){
+        A.push(p); sumA += p.rating;
+        if(p.side==="D") aD++; else aR++;
+      } else {
+        B.push(p); sumB += p.rating;
+        if(p.side==="D") bD++; else bR++;
+      }
     }
 
-    const dSplit = splitBalanced(rights, needPerTeamSide);
-    const rSplit = splitBalanced(lefts, needPerTeamSide);
+    // 1) Seed: top 2 de cada lado repartidos
+    // (si needPerTeamSide==1, igual funciona porque solo necesita 1D y 1R por equipo)
+    add("A", Ds[0]); add("B", Ds[1]);
+    add("A", Rs[0]); add("B", Rs[1]);
 
-    const A = [...dSplit.a, ...rSplit.a];
-    const B = [...dSplit.b, ...rSplit.b];
+    const restD = Ds.slice(2);
+    const restR = Rs.slice(2);
 
+    // 2) Greedy: poner siguiente más fuerte donde minimice diferencia de sumas
+    function greedyFill(list){
+      for(const p of list){
+        const okA = canAdd("A", p);
+        const okB = canAdd("B", p);
+
+        if(!okA && !okB) throw new Error("No hay cupo en A/B para asignar (revisa selección).");
+        if(okA && !okB) { add("A", p); continue; }
+        if(!okA && okB) { add("B", p); continue; }
+
+        const diffIfA = Math.abs((sumA + p.rating) - sumB);
+        const diffIfB = Math.abs(sumA - (sumB + p.rating));
+        if(diffIfA < diffIfB) add("A", p);
+        else if(diffIfB < diffIfA) add("B", p);
+        else { if(sumA <= sumB) add("A", p); else add("B", p); }
+      }
+    }
+
+    greedyFill(restD);
+    greedyFill(restR);
+
+    // 3) Swaps locales (D<->D y R<->R) para bajar aún más Δ
+    function improveSwaps(side){
+      let improved = true;
+      let loops = 0;
+      while(improved && loops < 400){
+        loops++;
+        improved = false;
+        const aList = A.filter(x=>x.side===side);
+        const bList = B.filter(x=>x.side===side);
+        const baseDiff = Math.abs(sumA - sumB);
+
+        for(const pa of aList){
+          for(const pb of bList){
+            const newSumA = sumA - pa.rating + pb.rating;
+            const newSumB = sumB - pb.rating + pa.rating;
+            const newDiff = Math.abs(newSumA - newSumB);
+            if(newDiff < baseDiff){
+              const ia = A.findIndex(x=>x.id===pa.id);
+              const ib = B.findIndex(x=>x.id===pb.id);
+              A[ia] = pb; B[ib] = pa;
+              sumA = newSumA; sumB = newSumB;
+              improved = true;
+              break;
+            }
+          }
+          if(improved) break;
+        }
+      }
+    }
+    improveSwaps("D");
+    improveSwaps("R");
+
+    // Pasar a estado app
     teamA = A.map(p=>({id:p.id}));
     teamB = B.map(p=>({id:p.id}));
     selected = [];
@@ -1067,24 +969,36 @@
     saveLocalState();
     render();
 
-    setStatus(status, `✅ Autoarmado listo. A prom:${avgRating(teamA)} • B prom:${avgRating(teamB)}`, "ok");
+    const avgA = Math.round((sumA / A.length) * 100) / 100;
+    const avgB = Math.round((sumB / B.length) * 100) / 100;
+    const diff = Math.round(Math.abs(avgA - avgB) * 100) / 100;
+
+    setStatus(status, `✅ Autoarmado mejorado: prom A=${avgA} • prom B=${avgB} • Δ=${diff}`, diff<=0.2 ? "ok" : (diff<=0.5 ? "warn" : "error"));
   }
 
+  // =====================
   // Turnos generation
+  // =====================
+  function shuffle(arr){
+    for(let i=arr.length-1;i>0;i--){
+      const j = Math.floor(Math.random()*(i+1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
   function pairKey(a,b){ return [a.id,b.id].sort().join("||"); }
   function formatPlayer(p){ return `${normalizeName(p.name)}(${p.side})-${p.rating}`; }
   function formatPair(pair){ return `${formatPlayer(pair[0])} + ${formatPlayer(pair[1])}`; }
   function matchId(turn, court){ return `T${turn}-C${court}`; }
 
-  // Backtracking pairing D+R avoiding repeats
   function buildPairs(teamRefs, usedPairs){
     const players = teamRefs.map(r=>byId(r.id)).filter(Boolean);
     const rights = shuffle(players.filter(p=>p.side==="D").slice());
     const lefts  = players.filter(p=>p.side==="R").slice();
     if(rights.length !== lefts.length) return null;
 
-    /** @type {[PlayerDB,PlayerDB][]} */ const result = [];
-
+    const result = [];
     function backtrack(i, remainingLefts){
       if(i===rights.length) return true;
       const r = rights[i];
@@ -1345,26 +1259,19 @@
   });
 
   // =====================
-  // Delete player (confirm) from DB list via context menu: doble click en nombre (simple)
-  // (para mantener UI limpia: borrado desde DB no se puso botón visible)
-  // Tip: para borrar: escribe nombre vacío? NO. Mejor: long press no. Lo dejamos fuera por ahora.
-  // =====================
-
-  // =====================
   // Auth + init
   // =====================
   async function initAfterLogin(){
     loadLocalState();
     await loadDBFromSupabase();
 
-    // Filtrar ids que ya no existen en db
     const ids = new Set(db.map(p=>p.id));
     selected = selected.filter(r=>ids.has(r.id));
     teamA = teamA.filter(r=>ids.has(r.id));
     teamB = teamB.filter(r=>ids.has(r.id));
 
     render();
-    setStatus(status, "Listo: selecciona jugadores → arma A/B → genera turnos.", "ok");
+    setStatus(status, "Listo: selecciona jugadores → autoarmar A/B → genera turnos.", "ok");
   }
 
   async function checkSession(){
