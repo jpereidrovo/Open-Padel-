@@ -8,7 +8,9 @@
   <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <style>
+ #authStatus { pointer-events: none; }
+#loginBtn, #logoutBtn { z-index: 10; position: relative; pointer-events: auto; }
+ <style>
     body { font-family: system-ui, Arial; background:#0b1020; color:#eef2ff; margin:0 }
     .wrap { max-width:1100px; margin:auto; padding:16px }
     h1 { font-size:20px }
