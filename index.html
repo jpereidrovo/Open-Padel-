@@ -5,79 +5,22 @@
   <title>Open Padel</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <!-- Supabase JS -->
+  <!-- Supabase JS (v2) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
-    body {
-      font-family: system-ui, Arial, sans-serif;
-      background: #0b1020;
-      color: #eef2ff;
-      margin: 0;
-    }
-    .wrap {
-      max-width: 1100px;
-      margin: auto;
-      padding: 16px;
-    }
-    h1 { font-size: 22px; }
-
-    button {
-      padding: 10px 14px;
-      border-radius: 8px;
-      border: none;
-      cursor: pointer;
-    }
-    button.primary {
-      background: #4f46e5;
-      color: white;
-    }
-    button.ghost {
-      background: #1f2937;
-      color: white;
-    }
-
-    input, select {
-      padding: 8px;
-      border-radius: 6px;
-      border: 1px solid #555;
-      background: #111;
-      color: white;
-    }
-
-    .card {
-      background: #111827;
-      padding: 14px;
-      border-radius: 12px;
-      margin-bottom: 14px;
-    }
-
-    .row {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-
-    .list {
-      display: grid;
-      gap: 8px;
-      margin-top: 10px;
-    }
-
-    .item {
-      background: #1f2937;
-      padding: 10px;
-      border-radius: 8px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .muted {
-      opacity: 0.7;
-      font-size: 13px;
-    }
+    body { font-family: system-ui, Arial, sans-serif; background:#0b1020; color:#eef2ff; margin:0 }
+    .wrap { max-width:1100px; margin:auto; padding:16px }
+    h1 { font-size:22px; margin:10px 0 16px }
+    .card { background:#111827; padding:14px; border-radius:12px; margin-bottom:14px }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center }
+    button { padding:10px 14px; border-radius:8px; border:none; cursor:pointer; font-weight:700 }
+    button.primary { background:#4f46e5; color:white }
+    button.ghost { background:#1f2937; color:white }
+    input, select { padding:8px; border-radius:6px; border:1px solid #555; background:#111; color:white }
+    .list { display:grid; gap:8px; margin-top:10px }
+    .item { background:#1f2937; padding:10px; border-radius:8px; display:flex; justify-content:space-between; align-items:center }
+    .muted { opacity:.75; font-size:13px }
   </style>
 </head>
 
@@ -85,7 +28,6 @@
 <div class="wrap">
   <h1>🎾 Open Padel</h1>
 
-  <!-- LOGIN -->
   <div class="card">
     <div class="row">
       <div id="authStatus" class="muted">Cargando sesión…</div>
@@ -94,9 +36,8 @@
     </div>
   </div>
 
-  <!-- APP -->
   <div class="card" id="app" style="display:none">
-    <h3>Base de jugadores</h3>
+    <h3 style="margin:0 0 10px;">Base de jugadores</h3>
 
     <div class="row">
       <input id="name" placeholder="Nombre" />
@@ -113,109 +54,130 @@
 </div>
 
 <script>
-/* =======================
-   SUPABASE CONFIG
-======================= */
-const SUPABASE_URL = "https://tuquyruyyizzccxrvafc.supabase.co";
-const SUPABASE_ANON_KEY =
-"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1cXV5cnV5eWl6emNjeHJ2YWZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MTY5NjgsImV4cCI6MjA4MzI5Mjk2OH0.mTsLI_LQC9ccI7Yoc8UL7coGqQlab8NTp3ItFnX7nnE";
+  // =======================
+  // SUPABASE CONFIG
+  // =======================
+  const SUPABASE_URL = "https://tuquyruyyizzccxrvafc.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1cXV5cnV5eWl6emNjeHJ2YWZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MTY5NjgsImV4cCI6MjA4MzI5Mjk2OH0.mTsLI_LQC9ccI7Yoc8UL7coGqQlab8NTp3ItFnX7nnE";
 
-const supabase = window.supabase.createClient(
-  SUPABASE_URL,
-  SUPABASE_ANON_KEY
-);
+  // IMPORTANT: el CDN expone el global "supabase"
+  if (!window.supabase || !window.supabase.createClient) {
+    document.getElementById("authStatus").textContent =
+      "Error: no cargó Supabase JS. Revisa tu conexión o bloqueadores.";
+    throw new Error("Supabase JS no cargó");
+  }
 
-/* =======================
-   AUTH
-======================= */
-const authStatus = document.getElementById("authStatus");
-const loginBtn = document.getElementById("loginBtn");
-const logoutBtn = document.getElementById("logoutBtn");
-const app = document.getElementById("app");
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-loginBtn.addEventListener("click", async () => {
-  await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo: window.location.origin + window.location.pathname
+  // =======================
+  // UI
+  // =======================
+  const authStatus = document.getElementById("authStatus");
+  const loginBtn = document.getElementById("loginBtn");
+  const logoutBtn = document.getElementById("logoutBtn");
+  const app = document.getElementById("app");
+  const playersDiv = document.getElementById("players");
+
+  // =======================
+  // AUTH
+  // =======================
+  loginBtn.addEventListener("click", async () => {
+    authStatus.textContent = "Abriendo Google…";
+    const { error } = await sb.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin + window.location.pathname
+      }
+    });
+    if (error) authStatus.textContent = "Error login: " + error.message;
+  });
+
+  logoutBtn.addEventListener("click", async () => {
+    await sb.auth.signOut();
+    location.reload();
+  });
+
+  async function checkSession() {
+    try {
+      const { data, error } = await sb.auth.getSession();
+      if (error) throw error;
+
+      if (data.session) {
+        authStatus.textContent = "Sesión iniciada ✅";
+        loginBtn.style.display = "none";
+        logoutBtn.style.display = "inline-block";
+        app.style.display = "block";
+        await loadPlayers();
+      } else {
+        authStatus.textContent = "Debes iniciar sesión";
+      }
+    } catch (e) {
+      authStatus.textContent = "Error sesión: " + (e?.message || e);
+    }
+  }
+
+  // también refresca si cambia la sesión
+  sb.auth.onAuthStateChange((_event, session) => {
+    if (session) {
+      authStatus.textContent = "Sesión iniciada ✅";
+      loginBtn.style.display = "none";
+      logoutBtn.style.display = "inline-block";
+      app.style.display = "block";
+      loadPlayers();
     }
   });
-});
 
-logoutBtn.addEventListener("click", async () => {
-  await supabase.auth.signOut();
-  location.reload();
-});
+  checkSession();
 
-async function checkSession() {
-  const { data } = await supabase.auth.getSession();
+  // =======================
+  // PLAYERS
+  // =======================
+  async function loadPlayers() {
+    const { data, error } = await sb.from("players").select("*").order("name");
+    if (error) {
+      alert(error.message);
+      return;
+    }
 
-  if (data.session) {
-    authStatus.textContent = "Sesión iniciada";
-    loginBtn.style.display = "none";
-    logoutBtn.style.display = "inline-block";
-    app.style.display = "block";
-    loadPlayers();
-  } else {
-    authStatus.textContent = "Debes iniciar sesión";
-  }
-}
-
-checkSession();
-
-/* =======================
-   PLAYERS
-======================= */
-const playersDiv = document.getElementById("players");
-
-async function loadPlayers() {
-  const { data, error } = await supabase
-    .from("players")
-    .select("*")
-    .order("name");
-
-  if (error) {
-    alert(error.message);
-    return;
+    playersDiv.innerHTML = "";
+    data.forEach(p => {
+      const div = document.createElement("div");
+      div.className = "item";
+      div.innerHTML = `
+        <div><b>${escapeHtml(p.name)}</b> (${p.side}) – ${p.rating}</div>
+        <button class="ghost">❌</button>
+      `;
+      div.querySelector("button").onclick = async () => {
+        const { error: delErr } = await sb.from("players").delete().eq("id", p.id);
+        if (delErr) return alert(delErr.message);
+        loadPlayers();
+      };
+      playersDiv.appendChild(div);
+    });
   }
 
-  playersDiv.innerHTML = "";
-  data.forEach(p => {
-    const div = document.createElement("div");
-    div.className = "item";
-    div.innerHTML = `
-      <div><b>${p.name}</b> (${p.side}) – ${p.rating}</div>
-      <button class="ghost">❌</button>
-    `;
-    div.querySelector("button").onclick = async () => {
-      await supabase.from("players").delete().eq("id", p.id);
-      loadPlayers();
-    };
-    playersDiv.appendChild(div);
-  });
-}
+  document.getElementById("add").addEventListener("click", async () => {
+    const name = document.getElementById("name").value.trim();
+    const side = document.getElementById("side").value;
+    const rating = Number(document.getElementById("rating").value);
 
-document.getElementById("add").addEventListener("click", async () => {
-  const name = document.getElementById("name").value.trim();
-  const side = document.getElementById("side").value;
-  const rating = Number(document.getElementById("rating").value);
+    if (!name) return alert("Ingresa un nombre");
+    if (!Number.isFinite(rating) || rating < 1 || rating > 10) return alert("Nivel inválido (1–10)");
 
-  if (!name) {
-    alert("Ingresa un nombre");
-    return;
-  }
+    const { error } = await sb.from("players").insert([{ name, side, rating }]);
+    if (error) return alert(error.message);
 
-  const { error } = await supabase
-    .from("players")
-    .insert([{ name, side, rating }]);
-
-  if (error) {
-    alert(error.message);
-  } else {
     document.getElementById("name").value = "";
     loadPlayers();
+  });
+
+  function escapeHtml(s) {
+    return String(s ?? "")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;");
   }
-});
 </script>
 </body>
 </html>
