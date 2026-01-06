@@ -880,6 +880,146 @@
   }
 
   function autoBuildTeamsBalancedFromSelected(){
+  const allIds = new Set([
+    ...selected.map(r=>r.id),
+    ...teamA.map(r=>r.id),
+    ...teamB.map(r=>r.id),
+  ]);
+
+  if(allIds.size !== totalPlayers()) throw new Error(`Selecciona exactamente ${totalPlayers()} jugadores antes de autoarmar.`);
+
+  const players = [...allIds].map(id=>byId(id)).filter(Boolean);
+  const needPerSide = totalPerSide();        // total D y total R en la selección
+  const needPerTeamSide = perTeamSide();     // D y R por equipo
+
+  const Ds = players.filter(p=>p.side==="D").slice().sort((a,b)=>b.rating-a.rating);
+  const Rs = players.filter(p=>p.side==="R").slice().sort((a,b)=>b.rating-a.rating);
+
+  if(Ds.length !== needPerSide || Rs.length !== needPerSide){
+    throw new Error(`Los ${totalPlayers()} seleccionados deben tener ${needPerSide}D y ${needPerSide}R.`);
+  }
+
+  // Helpers de sumas y cupos
+  const A = [], B = [];
+  let sumA = 0, sumB = 0;
+  let aD = 0, aR = 0, bD = 0, bR = 0;
+
+  function canAdd(team, p){
+    if(team === "A"){
+      if(p.side==="D") return aD < needPerTeamSide;
+      return aR < needPerTeamSide;
+    } else {
+      if(p.side==="D") return bD < needPerTeamSide;
+      return bR < needPerTeamSide;
+    }
+  }
+  function add(team, p){
+    if(team==="A"){
+      A.push(p); sumA += p.rating;
+      if(p.side==="D") aD++; else aR++;
+    } else {
+      B.push(p); sumB += p.rating;
+      if(p.side==="D") bD++; else bR++;
+    }
+  }
+
+  // 1) SEED: top 2 D y top 2 R, uno en cada equipo
+  // Idea: repartir #1 y #2 para evitar que un equipo se lleve todas las “bestias”.
+  // D
+  add("A", Ds[0]);
+  add("B", Ds[1]);
+  // R
+  add("A", Rs[0]);
+  add("B", Rs[1]);
+
+  const restD = Ds.slice(2);
+  const restR = Rs.slice(2);
+
+  // 2) Asignación greedy: el siguiente más fuerte va al equipo que deje sumas más parejas,
+  // respetando cupos.
+  function greedyFill(list){
+    for(const p of list){
+      const tryA = canAdd("A", p);
+      const tryB = canAdd("B", p);
+
+      if(!tryA && !tryB){
+        throw new Error("No hay cupo en A/B para asignar (revisa selección).");
+      } else if(tryA && !tryB){
+        add("A", p);
+      } else if(!tryA && tryB){
+        add("B", p);
+      } else {
+        // ambos posibles: decide por mínima diferencia de sumas
+        const diffIfA = Math.abs((sumA + p.rating) - sumB);
+        const diffIfB = Math.abs(sumA - (sumB + p.rating));
+        if(diffIfA < diffIfB) add("A", p);
+        else if(diffIfB < diffIfA) add("B", p);
+        else {
+          // empate: manda al equipo con menor suma actual
+          if(sumA <= sumB) add("A", p); else add("B", p);
+        }
+      }
+    }
+  }
+
+  // Llenar primero con los ratings más altos para controlar mejor el balance
+  greedyFill(restD);   // derechos
+  greedyFill(restR);   // reveses
+
+  // 3) OPTIMIZACIÓN final (swap local) para bajar todavía más la diferencia
+  // Solo swaps dentro del mismo lado (D<->D, R<->R) para no romper el cupo.
+  function improveSwaps(side){
+    let improved = true;
+    let loops = 0;
+    while(improved && loops < 400){ // límite para no colgar
+      loops++;
+      improved = false;
+      const aList = A.filter(x=>x.side===side);
+      const bList = B.filter(x=>x.side===side);
+
+      const baseDiff = Math.abs(sumA - sumB);
+      for(const pa of aList){
+        for(const pb of bList){
+          // si swap pa<->pb
+          const newSumA = sumA - pa.rating + pb.rating;
+          const newSumB = sumB - pb.rating + pa.rating;
+          const newDiff = Math.abs(newSumA - newSumB);
+          if(newDiff < baseDiff){
+            // aplicar swap
+            const ia = A.findIndex(x=>x.id===pa.id);
+            const ib = B.findIndex(x=>x.id===pb.id);
+            A[ia] = pb; B[ib] = pa;
+            sumA = newSumA; sumB = newSumB;
+            improved = true;
+            break;
+          }
+        }
+        if(improved) break;
+      }
+    }
+  }
+
+  improveSwaps("D");
+  improveSwaps("R");
+
+  // Exportar a estado de la app
+  teamA = A.map(p=>({id:p.id}));
+  teamB = B.map(p=>({id:p.id}));
+  selected = [];
+
+  scores.clear();
+  clearOutput();
+  saveLocalState();
+  render();
+
+  // Info final
+  const avgA = Math.round((sumA / A.length) * 100) / 100;
+  const avgB = Math.round((sumB / B.length) * 100) / 100;
+  const diff = Math.round(Math.abs(avgA - avgB) * 100) / 100;
+
+  setStatus(status, `✅ Autoarmado mejorado: prom A=${avgA} • prom B=${avgB} • Δ=${diff}`, diff <= 0.2 ? "ok" : (diff <= 0.5 ? "warn" : "error"));
+}
+
     const allIds = new Set([
       ...selected.map(r=>r.id),
       ...teamA.map(r=>r.id),
