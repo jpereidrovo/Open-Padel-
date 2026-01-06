@@ -10,7 +10,7 @@
     .wrap { max-width: 1600px; margin: 0 auto; padding: 18px; }
     h1 { margin: 6px 0 14px; font-size: 20px; }
     h2 { margin: 0 0 10px; font-size: 16px; }
-    .grid { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1.15fr; gap: 14px; }
+    .grid { display: grid; grid-template-columns: 1.45fr 1fr 1fr 1.15fr; gap: 14px; }
     .card { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 14px; }
     label { display: block; font-size: 12px; opacity: .9; margin-bottom: 6px; }
     input, select, button {
@@ -33,6 +33,7 @@
     .pill { display: inline-flex; gap: 8px; align-items: center; padding: 6px 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; font-size: 12px; }
     .error { color: #fecaca; }
     .ok { color: #bbf7d0; }
+    .warn { color: #fde68a; }
     .muted { opacity: .8; }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
@@ -44,9 +45,11 @@
     .scoreRow { display:grid; grid-template-columns: 1fr 180px; gap:10px; align-items:center; }
 
     .table { display:grid; gap:8px; }
+
+    /* checkbox + nombre editable + side + rating + toA + toB */
     .dbRow {
       display: grid;
-      grid-template-columns: auto 1.1fr .55fr .55fr auto auto;
+      grid-template-columns: auto 1.2fr .55fr .55fr auto auto;
       gap: 8px;
       align-items: center;
       padding: 10px 12px;
@@ -54,7 +57,6 @@
       background: rgba(0,0,0,.18);
       border-radius: 12px;
     }
-    .dbRow .name { font-weight: 800; }
     .mini { font-size: 12px; opacity:.85; }
     .badge { display:inline-flex; padding: 3px 8px; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; font-size: 12px; opacity:.95; justify-content:center; }
     .split { display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; }
@@ -70,10 +72,14 @@
       background: rgba(0,0,0,.18);
       border-radius: 12px;
     }
-    .dbRow select, .dbRow input[type="number"]{
+
+    .dbRow select, .dbRow input[type="number"], .dbRow input.nameInp{
       width: 100%;
       padding: 8px 10px;
       border-radius: 10px;
+    }
+    .dbRow input.nameInp{
+      font-weight: 800;
     }
 
     @media (max-width: 1200px) { .grid { grid-template-columns: 1fr; } }
@@ -128,6 +134,7 @@
             <span id="selCountText">0/16</span>
             <span class="muted" id="selSideText">D:0 R:0</span>
           </div>
+          <div class="mini" id="selNeedText" style="margin-top:6px;"></div>
         </div>
       </div>
 
@@ -185,8 +192,8 @@
 
       <div id="dbStatus" class="hint" style="margin-top:10px;"></div>
       <div class="hint muted" style="margin-top:8px;">
-        1) Marca <b>checkbox</b> para seleccionar jugadores. <br/>
-        2) Luego <b>Autoarmar</b> o arma <b>manual</b> moviendo jugadores a A/B.
+        ✔ Puedes editar el <b>nombre</b>, <b>D/R</b> y <b>nivel</b> en la lista.<br/>
+        ✔ Para seleccionar, marca checkbox (no te dejará pasar del D/R requerido).
       </div>
     </div>
 
@@ -214,7 +221,7 @@
       <div id="teamAStatus" class="hint"></div>
     </div>
 
-    <!-- DERECHA: EQUIPO B + TURNOS -->
+    <!-- EQUIPO B + TURNOS -->
     <div class="card">
       <div class="split">
         <h2>Equipo B</h2>
@@ -264,7 +271,7 @@
       <div id="out" class="list"></div>
 
       <div class="hint muted" style="margin-top:12px;">
-        PDF: Exportar → abre impresión → elige <b>Guardar como PDF</b>.
+        PDF: Exportar → impresión → <b>Guardar como PDF</b>.
       </div>
     </div>
   </div>
@@ -277,9 +284,15 @@
 
   const TURNS = 3;
 
-  const STORE_DB = "open_padel_db_v4";
-  const STORE_STATE = "open_padel_state_v4"; // cfg + selection + teams
-  const STORE_SCORES = "open_padel_scores_v4";
+  // ✅ Claves ESTABLES (no cambian con actualizaciones)
+  const STORE_DB = "open_padel_db";
+  const STORE_STATE = "open_padel_state";
+  const STORE_SCORES = "open_padel_scores";
+
+  // Claves antiguas (migración)
+  const LEGACY_DB_KEYS = ["open_padel_db_v4","open_padel_db_v3","open_padel_db_v2","open_padel_db_v1"];
+  const LEGACY_STATE_KEYS = ["open_padel_state_v4","open_padel_teams_v3","open_padel_teams_v2","open_padel_teams_v1"];
+  const LEGACY_SCORES_KEYS = ["open_padel_scores_v4","open_padel_scores_v3","open_padel_scores_v2","open_padel_scores_v1"];
 
   const $ = (id)=>document.getElementById(id);
 
@@ -290,6 +303,7 @@
 
   const selCountText = $("selCountText");
   const selSideText = $("selSideText");
+  const selNeedText = $("selNeedText");
   const poolInfo = $("poolInfo");
 
   const dbName = $("dbName");
@@ -342,7 +356,7 @@
   function totalPerSide(){ return totalPlayers() / 2; } // total D and total R in selected
 
   function setStatus(el, msg, kind="") {
-    el.className = "hint " + (kind==="error" ? "error" : kind==="ok" ? "ok" : "");
+    el.className = "hint " + (kind==="error" ? "error" : kind==="ok" ? "ok" : kind==="warn" ? "warn" : "");
     el.textContent = msg;
   }
 
@@ -350,44 +364,7 @@
     return Math.random().toString(16).slice(2) + "-" + Date.now().toString(16);
   }
 
-  function saveAll() {
-    try {
-      localStorage.setItem(STORE_DB, JSON.stringify(db));
-      localStorage.setItem(STORE_STATE, JSON.stringify({
-        totalPlayers: totalPlayers(),
-        selected, teamA, teamB
-      }));
-      localStorage.setItem(STORE_SCORES, JSON.stringify(Object.fromEntries(scores)));
-    } catch {}
-  }
-
-  function loadAll() {
-    try {
-      const rawDB = localStorage.getItem(STORE_DB);
-      const rawState = localStorage.getItem(STORE_STATE);
-      const rawScores = localStorage.getItem(STORE_SCORES);
-
-      if (rawDB) db = JSON.parse(rawDB) || [];
-      if (rawState) {
-        const st = JSON.parse(rawState) || {};
-        const v = Number(st.totalPlayers);
-        if ([4,8,12,16,20,24].includes(v)) totalPlayersEl.value = String(v);
-        selected = Array.isArray(st.selected) ? st.selected : [];
-        teamA = Array.isArray(st.teamA) ? st.teamA : [];
-        teamB = Array.isArray(st.teamB) ? st.teamB : [];
-      }
-      if (rawScores) {
-        const o = JSON.parse(rawScores) || {};
-        scores = new Map(Object.entries(o));
-      }
-    } catch {}
-  }
-
   function byId(id) { return db.find(p => p.id === id) || null; }
-
-  function inAnyList(id){
-    return selected.some(r=>r.id===id) || teamA.some(r=>r.id===id) || teamB.some(r=>r.id===id);
-  }
 
   function countSide(refs, side) {
     return refs.reduce((acc, r) => {
@@ -403,46 +380,184 @@
     return Math.round((sum / players.length) * 10) / 10;
   }
 
+  function clearOutput(){ out.innerHTML = ""; }
+
+  function saveAll() {
+    try {
+      localStorage.setItem(STORE_DB, JSON.stringify(db));
+      localStorage.setItem(STORE_STATE, JSON.stringify({
+        totalPlayers: totalPlayers(),
+        selected, teamA, teamB
+      }));
+      localStorage.setItem(STORE_SCORES, JSON.stringify(Object.fromEntries(scores)));
+    } catch {}
+  }
+
+  function loadKeyFirst(keys){
+    for(const k of keys){
+      const v = localStorage.getItem(k);
+      if(v) return {key:k, val:v};
+    }
+    return null;
+  }
+
+  // ✅ Migración automática si existe data vieja
+  function migrateIfNeeded(){
+    if(localStorage.getItem(STORE_DB)) return; // ya en formato nuevo
+
+    const legacyDB = loadKeyFirst(LEGACY_DB_KEYS);
+    if(legacyDB){
+      try { localStorage.setItem(STORE_DB, legacyDB.val); } catch {}
+    }
+
+    const legacyScores = loadKeyFirst(LEGACY_SCORES_KEYS);
+    if(legacyScores){
+      try { localStorage.setItem(STORE_SCORES, legacyScores.val); } catch {}
+    }
+
+    // Para state, aceptamos lo que haya (algunos legacy solo tenían teams)
+    const legacyState = loadKeyFirst(LEGACY_STATE_KEYS);
+    if(legacyState){
+      try {
+        // Si es formato {teamA, teamB} lo adaptamos a {totalPlayers, selected, teamA, teamB}
+        const obj = JSON.parse(legacyState.val);
+        if(obj && (obj.teamA || obj.teamB) && !obj.selected){
+          const tA = Array.isArray(obj.teamA) ? obj.teamA : [];
+          const tB = Array.isArray(obj.teamB) ? obj.teamB : [];
+          const total = (tA.length + tB.length) || 16;
+          localStorage.setItem(STORE_STATE, JSON.stringify({ totalPlayers: total, selected: [], teamA: tA, teamB: tB }));
+        } else {
+          localStorage.setItem(STORE_STATE, legacyState.val);
+        }
+      } catch {}
+    }
+  }
+
+  function loadAll() {
+    migrateIfNeeded();
+    try {
+      const rawDB = localStorage.getItem(STORE_DB);
+      const rawState = localStorage.getItem(STORE_STATE);
+      const rawScores = localStorage.getItem(STORE_SCORES);
+
+      if (rawDB) db = JSON.parse(rawDB) || [];
+
+      if (rawState) {
+        const st = JSON.parse(rawState) || {};
+        const v = Number(st.totalPlayers);
+        if ([4,8,12,16,20,24].includes(v)) totalPlayersEl.value = String(v);
+        selected = Array.isArray(st.selected) ? st.selected : [];
+        teamA = Array.isArray(st.teamA) ? st.teamA : [];
+        teamB = Array.isArray(st.teamB) ? st.teamB : [];
+      }
+
+      if (rawScores) {
+        const o = JSON.parse(rawScores) || {};
+        scores = new Map(Object.entries(o));
+      }
+    } catch {}
+  }
+
+  function normalizeName(s){
+    return (s ?? "").trim().replace(/\s+/g," ");
+  }
+
+  function nameExists(name, exceptId=null){
+    const n = normalizeName(name).toLowerCase();
+    return db.some(p => p.id !== exceptId && normalizeName(p.name).toLowerCase() === n);
+  }
+
+  function selectionStats(){
+    const d = countSide(selected,"D");
+    const r = countSide(selected,"R");
+    const need = totalPerSide();
+    return {d, r, need, ok: (d===need && r===need && selected.length===totalPlayers())};
+  }
+
   function renderPills(){
     pillPlayers.innerHTML = `Jugadores: <b>${totalPlayers()}</b>`;
     pillCourts.innerHTML = `Canchas/turno: <b>${courts()}</b>`;
   }
 
   function renderSelectionHeader(){
+    const d = countSide(selected,"D");
+    const r = countSide(selected,"R");
+    const need = totalPerSide();
+
     selCountText.textContent = `${selected.length}/${totalPlayers()}`;
-    selSideText.textContent = `D:${countSide(selected,"D")} R:${countSide(selected,"R")}`;
-    poolInfo.textContent = `${selected.length}/${totalPlayers()} • D:${countSide(selected,"D")} R:${countSide(selected,"R")} • prom:${avgRating(selected)}`;
+    selSideText.textContent = `D:${d} R:${r}`;
+
+    // Necesidades
+    let msg = `Requiere D:${need} R:${need}. `;
+    const dDiff = need - d;
+    const rDiff = need - r;
+
+    if(selected.length < totalPlayers()){
+      // todavía falta completar N
+      msg += `Faltan ${totalPlayers()-selected.length} jugadores`;
+      if(dDiff>0 || rDiff>0) msg += ` | faltan D:${Math.max(0,dDiff)} R:${Math.max(0,rDiff)}`;
+      if(dDiff<0 || rDiff<0) msg += ` | sobran D:${Math.max(0,-dDiff)} R:${Math.max(0,-rDiff)}`;
+      selNeedText.className = "mini warn";
+    } else {
+      // ya completó N
+      if(d===need && r===need){
+        msg += "✅ Selección correcta (mix D/R OK).";
+        selNeedText.className = "mini ok";
+      } else {
+        msg += `❌ Mix incorrecto: `;
+        if(d!==need) msg += `D=${d} `;
+        if(r!==need) msg += `R=${r} `;
+        selNeedText.className = "mini error";
+      }
+    }
+
+    selNeedText.textContent = msg;
+    poolInfo.textContent = `${selected.length}/${totalPlayers()} • D:${d} R:${r} • prom:${avgRating(selected)}`;
   }
 
   function renderDB(){
     const q = dbSearch.value.trim().toLowerCase();
     const sort = dbSort.value;
 
-    let items = db.slice().filter(p => p.name.toLowerCase().includes(q));
-    if (sort === "name") items.sort((a,b)=>a.name.localeCompare(b.name));
-    if (sort === "ratingDesc") items.sort((a,b)=>b.rating-a.rating || a.name.localeCompare(b.name));
-    if (sort === "ratingAsc") items.sort((a,b)=>a.rating-b.rating || a.name.localeCompare(b.name));
-    if (sort === "side") items.sort((a,b)=>a.side.localeCompare(b.side) || a.name.localeCompare(b.name));
+    let items = db.slice().filter(p => normalizeName(p.name).toLowerCase().includes(q));
+    if (sort === "name") items.sort((a,b)=>normalizeName(a.name).localeCompare(normalizeName(b.name)));
+    if (sort === "ratingDesc") items.sort((a,b)=>b.rating-a.rating || normalizeName(a.name).localeCompare(normalizeName(b.name)));
+    if (sort === "ratingAsc") items.sort((a,b)=>a.rating-b.rating || normalizeName(a.name).localeCompare(normalizeName(b.name)));
+    if (sort === "side") items.sort((a,b)=>a.side.localeCompare(b.side) || normalizeName(a.name).localeCompare(normalizeName(b.name)));
 
     dbCount.textContent = `${db.length} en base`;
     dbList.innerHTML = "";
 
     const maxSel = totalPlayers();
-    const selFull = selected.length >= maxSel;
+    const needPerSide = totalPerSide();
 
     for(const p of items){
       const isSel = selected.some(r=>r.id===p.id);
       const isInTeams = teamA.some(r=>r.id===p.id) || teamB.some(r=>r.id===p.id);
 
+      // reglas para checkbox:
+      // - no seleccionar si está en equipos
+      // - no pasar de N
+      // - no pasar de D o R requerido
+      const dNow = countSide(selected,"D");
+      const rNow = countSide(selected,"R");
+      const wouldBeD = p.side==="D" ? dNow+ (isSel?0:1) : dNow;
+      const wouldBeR = p.side==="R" ? rNow+ (isSel?0:1) : rNow;
+      const selFull = selected.length >= maxSel;
+
+      const disablePick =
+        isInTeams ||
+        (!isSel && selFull) ||
+        (!isSel && (wouldBeD > needPerSide || wouldBeR > needPerSide));
+
       const row = document.createElement("div");
       row.className = "dbRow";
 
-      const cbDisabled = (!isSel && selFull) || isInTeams; // si ya está en equipos, no debe seleccionarse
       row.innerHTML = `
-        <input type="checkbox" class="pickCb" data-id="${p.id}" ${isSel ? "checked":""} ${cbDisabled ? "disabled":""} />
+        <input type="checkbox" class="pickCb" data-id="${p.id}" ${isSel ? "checked":""} ${disablePick ? "disabled":""} />
 
         <div>
-          <div class="name">${p.name}</div>
+          <input class="nameInp" data-id="${p.id}" value="${escapeHtmlAttr(normalizeName(p.name))}" />
           <div class="mini muted">${isInTeams ? "En A/B" : (isSel ? "Seleccionado" : "Disponible")} • ${p.id.slice(0,6)}</div>
         </div>
 
@@ -464,27 +579,80 @@
       cb.addEventListener("change", ()=>{
         const id = cb.getAttribute("data-id");
         if(!id) return;
+
+        const p = byId(id);
+        if(!p) return;
+
         if(cb.checked){
+          // límite total
           if(selected.length >= totalPlayers()){
             cb.checked = false;
             return setStatus(dbStatus, `Ya tienes ${totalPlayers()} seleccionados.`, "error");
           }
-          // No seleccionar si está en equipos
+          // no seleccionar si está en equipos
           if(teamA.some(r=>r.id===id) || teamB.some(r=>r.id===id)){
             cb.checked = false;
             return setStatus(dbStatus, "Ese jugador ya está en A/B.", "error");
           }
+          // límite por lado
+          const dNow = countSide(selected,"D");
+          const rNow = countSide(selected,"R");
+          const need = totalPerSide();
+          if(p.side==="D" && dNow >= need){
+            cb.checked = false;
+            return setStatus(dbStatus, `Ya tienes ${need} Derecha (D).`, "warn");
+          }
+          if(p.side==="R" && rNow >= need){
+            cb.checked = false;
+            return setStatus(dbStatus, `Ya tienes ${need} Revés (R).`, "warn");
+          }
+
           selected.push({id});
         }else{
           selected = selected.filter(r=>r.id!==id);
-          // si estaba en A o B por alguna razón, también lo sacamos (consistencia)
           teamA = teamA.filter(r=>r.id!==id);
           teamB = teamB.filter(r=>r.id!==id);
         }
+
         scores.clear();
         clearOutput();
         saveAll();
         render();
+      });
+    });
+
+    // Editar NOMBRE (on blur + Enter)
+    dbList.querySelectorAll("input.nameInp").forEach(inp=>{
+      const apply = ()=>{
+        const id = inp.getAttribute("data-id");
+        if(!id) return;
+        const original = byId(id);
+        if(!original) return;
+
+        const newName = normalizeName(inp.value);
+        if(!newName){
+          inp.value = normalizeName(original.name);
+          return setStatus(dbStatus, "Nombre inválido (vacío).", "error");
+        }
+        if(nameExists(newName, id)){
+          inp.value = normalizeName(original.name);
+          return setStatus(dbStatus, "Ya existe otro jugador con ese nombre.", "error");
+        }
+
+        if(newName !== normalizeName(original.name)){
+          db = db.map(p => p.id===id ? ({...p, name: newName}) : p);
+          saveAll();
+          renderSelectionHeader();
+          setStatus(dbStatus, "Nombre actualizado.", "ok");
+        }
+      };
+
+      inp.addEventListener("blur", apply);
+      inp.addEventListener("keydown", (e)=>{
+        if(e.key === "Enter"){
+          e.preventDefault();
+          inp.blur();
+        }
       });
     });
 
@@ -496,9 +664,26 @@
         const v = sel.value.toUpperCase();
         if(v!=="D" && v!=="R") return;
 
-        db = db.map(p => p.id===id ? ({...p, side: v}) : p);
+        // Si está seleccionado, no dejamos cambiar a un lado que rompa límites
+        const isSel = selected.some(r=>r.id===id);
+        if(isSel){
+          const dNow = countSide(selected,"D");
+          const rNow = countSide(selected,"R");
+          const need = totalPerSide();
+          const old = byId(id)?.side;
 
-        // Al cambiar lados puede romper reglas, avisamos pero no bloqueamos.
+          // simulación: quitar old, poner new
+          const dSim = dNow - (old==="D" ? 1 : 0) + (v==="D" ? 1 : 0);
+          const rSim = rNow - (old==="R" ? 1 : 0) + (v==="R" ? 1 : 0);
+
+          if(dSim > need || rSim > need){
+            // revert
+            sel.value = old || "D";
+            return setStatus(dbStatus, `No se puede: excede el mix requerido (D:${need} R:${need}).`, "warn");
+          }
+        }
+
+        db = db.map(p => p.id===id ? ({...p, side: v}) : p);
         saveAll();
         render();
         setStatus(dbStatus, "Lado actualizado.", "ok");
@@ -516,9 +701,8 @@
         inp.value = String(n);
 
         db = db.map(p => p.id===id ? ({...p, rating: n}) : p);
-
         saveAll();
-        render();
+        renderSelectionHeader();
         setStatus(dbStatus, "Nivel actualizado.", "ok");
       });
     });
@@ -529,7 +713,6 @@
         const act = btn.getAttribute("data-act");
         const id = btn.getAttribute("data-id");
         if(!id) return;
-
         if(act==="toA") moveSelectedToTeam(id, "A");
         if(act==="toB") moveSelectedToTeam(id, "B");
       });
@@ -539,16 +722,14 @@
   function renderPool(){
     poolList.innerHTML = "";
     const players = selected.map(r=>byId(r.id)).filter(Boolean);
-
-    // Sort by side then rating desc
-    players.sort((a,b)=>a.side.localeCompare(b.side) || b.rating-a.rating || a.name.localeCompare(b.name));
+    players.sort((a,b)=>a.side.localeCompare(b.side) || b.rating-a.rating || normalizeName(a.name).localeCompare(normalizeName(b.name)));
 
     for(const p of players){
       const item = document.createElement("div");
       item.className = "teamItem";
       item.innerHTML = `
         <div>
-          <div><b>${p.name}</b> <span class="badge">${p.side}</span> <span class="badge">${p.rating}</span></div>
+          <div><b>${escapeHtml(normalizeName(p.name))}</b> <span class="badge">${p.side}</span> <span class="badge">${p.rating}</span></div>
           <div class="mini muted">Seleccionado</div>
         </div>
         <button class="ghost small" data-act="toA" data-id="${p.id}" ${teamA.length>=teamSize() ? "disabled":""}>→ A</button>
@@ -569,15 +750,14 @@
     function renderTeam(listEl, refs, label){
       listEl.innerHTML = "";
       const players = refs.map(r=>byId(r.id)).filter(Boolean);
-      // sort for nicer view
-      players.sort((a,b)=>a.side.localeCompare(b.side) || b.rating-a.rating || a.name.localeCompare(b.name));
+      players.sort((a,b)=>a.side.localeCompare(b.side) || b.rating-a.rating || normalizeName(a.name).localeCompare(normalizeName(b.name)));
 
       for(const p of players){
         const item = document.createElement("div");
         item.className = "teamItem";
         item.innerHTML = `
           <div>
-            <div><b>${p.name}</b> <span class="badge">${p.side}</span> <span class="badge">${p.rating}</span></div>
+            <div><b>${escapeHtml(normalizeName(p.name))}</b> <span class="badge">${p.side}</span> <span class="badge">${p.rating}</span></div>
             <div class="mini muted">${label}</div>
           </div>
           <button class="ghost small" data-act="back" data-id="${p.id}">← Pool</button>
@@ -585,7 +765,6 @@
         `;
 
         item.querySelector('[data-act="back"]').addEventListener("click", ()=>{
-          // move back to pool (selected)
           if(!selected.some(r=>r.id===p.id)) selected.push({id:p.id});
           if(label==="Equipo A") teamA = teamA.filter(r=>r.id!==p.id);
           else teamB = teamB.filter(r=>r.id!==p.id);
@@ -594,7 +773,6 @@
         });
 
         item.querySelector('[data-act="remove"]').addEventListener("click", ()=>{
-          // remove from selection altogether
           selected = selected.filter(r=>r.id!==p.id);
           if(label==="Equipo A") teamA = teamA.filter(r=>r.id!==p.id);
           else teamB = teamB.filter(r=>r.id!==p.id);
@@ -627,7 +805,6 @@
     if(team==="A" && teamA.length>=teamSize()) return setStatus(teamAStatus, `A ya tiene ${teamSize()}.`, "error");
     if(team==="B" && teamB.length>=teamSize()) return setStatus(teamBStatus, `B ya tiene ${teamSize()}.`, "error");
 
-    // Remove from pool selection list
     selected = selected.filter(r=>r.id!==id);
 
     if(team==="A"){
@@ -645,14 +822,20 @@
   }
 
   function validateSelectedOrThrow(){
-    if(selected.length + teamA.length + teamB.length !== totalPlayers()){
-      // total seleccionados (pool + teams) debe ser exactamente N para generar bien
-      throw new Error(`Debes tener exactamente ${totalPlayers()} jugadores seleccionados (sumando Pool + A + B).`);
+    // total seleccionados = pool + teams
+    const total = selected.length + teamA.length + teamB.length;
+    if(total !== totalPlayers()){
+      throw new Error(`Debes tener exactamente ${totalPlayers()} jugadores seleccionados (Pool + A + B).`);
+    }
+    const need = totalPerSide();
+    const d = countSide(selected,"D") + countSide(teamA,"D") + countSide(teamB,"D");
+    const r = countSide(selected,"R") + countSide(teamA,"R") + countSide(teamB,"R");
+    if(d !== need || r !== need){
+      throw new Error(`Mix inválido en selección total: requiere D:${need} R:${need} (tienes D:${d} R:${r}).`);
     }
   }
 
   function validateTeamsOrThrow(){
-    // Teams must be full from the selected set
     if(teamA.length !== teamSize()) throw new Error(`Equipo A debe tener ${teamSize()} jugadores.`);
     if(teamB.length !== teamSize()) throw new Error(`Equipo B debe tener ${teamSize()} jugadores.`);
     if(countSide(teamA,"D") !== perTeamSide() || countSide(teamA,"R") !== perTeamSide())
@@ -661,9 +844,8 @@
       throw new Error(`Equipo B debe tener ${perTeamSide()}D y ${perTeamSide()}R.`);
   }
 
-  // Autoarmar usando SOLO los seleccionados (pool + los que ya estén en A/B)
+  // Autoarmar usando SOLO los seleccionados totales (pool + A/B)
   function autoBuildTeamsBalancedFromSelected(){
-    // conjunto de IDs seleccionados total = N
     const allIds = new Set([
       ...selected.map(r=>r.id),
       ...teamA.map(r=>r.id),
@@ -673,7 +855,6 @@
     if(allIds.size !== totalPlayers()) throw new Error(`Selecciona exactamente ${totalPlayers()} jugadores antes de autoarmar.`);
 
     const players = [...allIds].map(id=>byId(id)).filter(Boolean);
-
     const needPerSide = totalPerSide();
     const needPerTeamSide = perTeamSide();
 
@@ -681,14 +862,12 @@
     const lefts  = players.filter(p=>p.side==="R").slice().sort((a,b)=>b.rating-a.rating);
 
     if(rights.length !== needPerSide || lefts.length !== needPerSide){
-      throw new Error(`Los ${totalPlayers()} seleccionados deben tener ${needPerSide} Derecha (D) y ${needPerSide} Revés (R).`);
+      throw new Error(`Los ${totalPlayers()} seleccionados deben tener ${needPerSide}D y ${needPerSide}R.`);
     }
 
-    // Balance “snake/zigzag”
     function splitBalanced(list, countPerTeam){
-      // list desc
-      const hi = list.slice(0, countPerTeam).slice();
-      const lo = list.slice(countPerTeam).slice().reverse();
+      const hi = list.slice(0, countPerTeam).slice();          // top
+      const lo = list.slice(countPerTeam).slice().reverse();   // bottom
       const merged = [];
       for(let i=0;i<countPerTeam;i++){
         merged.push(hi[i]);
@@ -707,8 +886,6 @@
 
     teamA = A.map(p=>({id:p.id}));
     teamB = B.map(p=>({id:p.id}));
-
-    // Pool queda vacío (porque todos quedaron asignados a equipos)
     selected = [];
 
     scores.clear();
@@ -720,11 +897,13 @@
   }
 
   // Turnos
-  function clearOutput(){ out.innerHTML = ""; }
   function matchId(turn, court){ return `T${turn}-C${court}`; }
 
   function escapeHtml(s) {
-    return (s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+    return (s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+  }
+  function escapeHtmlAttr(s){
+    return escapeHtml(s).replaceAll('"',"&quot;");
   }
 
   function shuffle(arr){
@@ -736,8 +915,7 @@
   }
 
   function pairKey(a,b){ return [a.id,b.id].sort().join("||"); }
-
-  function formatPlayer(p){ return `${p.name}(${p.side})-${p.rating}`; }
+  function formatPlayer(p){ return `${normalizeName(p.name)}(${p.side})-${p.rating}`; }
   function formatPair(pair){ return `${formatPlayer(pair[0])} + ${formatPlayer(pair[1])}`; }
 
   // Backtracking D+R
@@ -787,11 +965,11 @@
       div.className = "court";
       div.innerHTML = `
         <div class="muted"><b>Cancha ${courtNum}</b></div>
-        <div>Equipo A: <code>${formatPair(m.a)}</code></div>
-        <div>Equipo B: <code>${formatPair(m.b)}</code></div>
+        <div>Equipo A: <code>${escapeHtml(formatPair(m.a))}</code></div>
+        <div>Equipo B: <code>${escapeHtml(formatPair(m.b))}</code></div>
         <div class="scoreRow">
           <div class="mini muted">Marcador (ej: 6-4 3-6 10-8)</div>
-          <input data-score-id="${id}" placeholder="Marcador..." value="${escapeHtml(existing)}" />
+          <input data-score-id="${id}" placeholder="Marcador..." value="${escapeHtmlAttr(existing)}" />
         </div>
       `;
       content.appendChild(div);
@@ -892,7 +1070,7 @@
 
   // Events
   totalPlayersEl.addEventListener("change", ()=>{
-    // Al cambiar N, limpiamos selección/equipos/turnos para consistencia
+    // cambiar N -> limpia selección/equipos/turnos, pero NO la base
     selected = [];
     teamA = [];
     teamB = [];
@@ -923,15 +1101,13 @@
   });
 
   dbAdd.addEventListener("click", ()=>{
-    const name = dbName.value.trim();
+    const name = normalizeName(dbName.value);
     const side = dbSide.value;
     const rating = Number(dbRating.value);
 
     if(!name) return setStatus(dbStatus, "Escribe un nombre.", "error");
+    if(nameExists(name)) return setStatus(dbStatus, "Ese nombre ya existe en la base.", "error");
     if(!Number.isFinite(rating) || rating<1 || rating>10) return setStatus(dbStatus, "Nivel inválido (1–10).", "error");
-
-    const exists = db.some(p => p.name.toLowerCase() === name.toLowerCase());
-    if(exists) return setStatus(dbStatus, "Ese nombre ya existe en la base.", "error");
 
     db.push({id: uid(), name, side, rating: Math.round(rating)});
     dbName.value = "";
@@ -958,7 +1134,6 @@
   dbSort.addEventListener("change", ()=>renderDB());
 
   teamAClear.addEventListener("click", ()=>{
-    // devolver A a pool
     teamA.forEach(r=>{
       if(!selected.some(x=>x.id===r.id)) selected.push({id:r.id});
     });
@@ -1031,7 +1206,7 @@
     selected=[]; teamA=[]; teamB=[]; scores.clear(); clearOutput();
     saveAll();
     render();
-    setStatus(status, "Ejemplo cargado. Elige N y selecciona jugadores con checkbox.", "ok");
+    setStatus(status, "Ejemplo cargado. Elige N y selecciona con checkbox.", "ok");
   });
 
   // Init
