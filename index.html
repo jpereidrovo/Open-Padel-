@@ -1032,11 +1032,10 @@
     return `${playerHtml(pair[0])} <span class="pairSep">+</span> ${playerHtml(pair[1])}`;
   }
   function pairText(pair){
-   sfs
-    // Plain text for CSV/copy (no badges)
-    const a = `${normalizeName(pair[0].name)} (${pair[0].side})`;
-    const b = `${normalizeName(pair[1].name)} (${pair[1].side})`;
-    return `${a} + ${b}`;
+  // Plain text for CSV/copy (no badges)
+  const a = `${normalizeName(pair[0].name)} (${pair[0].side})`;
+  const b = `${normalizeName(pair[1].name)} (${pair[1].side})`;
+  return `${a} + ${b}`;
   }
 
   // ===== Autoarmado mejorado =====
