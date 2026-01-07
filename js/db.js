@@ -1,5 +1,5 @@
-// db.js — Base de jugadores (local) + Pool con N automático (múltiplos de 4)
-// FIX: al cambiar pool dispara evento op:poolChanged (misma pestaña)
+// db.js — Base de jugadores + Pool con N automático (múltiplos de 4)
+// Dispara evento op:poolChanged para sincronizar Equipos/Turnos en la misma pestaña
 
 (function () {
   const KEY_PLAYERS = "op_players_v1";
@@ -11,20 +11,13 @@
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
   const norm = (s) => String(s ?? "").trim().replace(/\s+/g, " ");
   const uid = () => "p_" + Math.random().toString(16).slice(2) + Date.now().toString(16);
-
   const ALLOWED_TOTALS = [4, 8, 12, 16, 20, 24];
 
   function loadJSON(key, fallback) {
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : fallback;
-    } catch {
-      return fallback;
-    }
+    try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }
+    catch { return fallback; }
   }
-  function saveJSON(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
-  }
+  function saveJSON(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} }
 
   function getTotalPlayers() {
     const v = Number(localStorage.getItem(KEY_TOTAL) || 16);
@@ -35,9 +28,7 @@
     if (!ALLOWED_TOTALS.includes(n)) return;
     localStorage.setItem(KEY_TOTAL, String(n));
   }
-
   function deriveNFromPoolCount(poolCount) {
-    // múltiplo de 4 hacia abajo (mínimo 4)
     if (poolCount <= 0) return getTotalPlayers();
     const n = Math.max(4, Math.floor(poolCount / 4) * 4);
     return ALLOWED_TOTALS.includes(n) ? n : 24;
@@ -45,11 +36,11 @@
 
   function notifyPoolChanged() {
     try { localStorage.setItem(KEY_POOL_VER, String(Date.now())); } catch {}
-    // ✅ evento para la MISMA pestaña
     try { window.dispatchEvent(new CustomEvent("op:poolChanged")); } catch {}
   }
 
   function perSide(n) { return n / 2; }
+
   function escapeHtml(s) {
     return String(s ?? "")
       .replaceAll("&", "&amp;")
@@ -61,6 +52,7 @@
   let players = loadJSON(KEY_PLAYERS, []);
   let poolIds = new Set(loadJSON(KEY_POOL, []));
 
+  // Demo si vacío
   if (!Array.isArray(players) || players.length === 0) {
     players = [
       { id: uid(), name: "Juan", side: "D", rating: 7 },
@@ -111,10 +103,8 @@
 
   function persistPoolAndAutoN() {
     saveJSON(KEY_POOL, [...poolIds]);
-
     const newN = deriveNFromPoolCount(poolIds.size);
     if (newN !== getTotalPlayers()) setTotalPlayers(newN);
-
     notifyPoolChanged();
     updateBadges();
   }
@@ -133,12 +123,12 @@
       <div class="card" style="margin-top:10px;">
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
           <div>
-            <label>N automático (múltiplos de 4)</label>
-            <div class="pill">N actual: <b>${n}</b> (se ajusta solo según selección)</div>
-            <div class="hint muted" style="margin-top:6px;">Reglas pool: D=<b>${needSide}</b> y R=<b>${needSide}</b></div>
+            <label>N automático</label>
+            <div class="pill">N actual: <b>${n}</b> (múltiplos de 4)</div>
+            <div class="hint muted" style="margin-top:6px;">Objetivo pool: D=<b>${needSide}</b> y R=<b>${needSide}</b></div>
           </div>
           <div>
-            <label>Pool seleccionado</label>
+            <label>Pool</label>
             <div class="pill">Seleccionados: <b>${poolIds.size}</b> • D:<b>${d}</b> R:<b>${r}</b></div>
             <div id="opPoolHint" class="hint" style="margin-top:6px;"></div>
           </div>
@@ -181,17 +171,19 @@
         </div>
 
         <div id="opList" style="margin-top:12px; display:grid; gap:8px;"></div>
-        <div class="hint muted" style="margin-top:10px;">Al marcar/desmarcar, Equipos se actualiza al instante.</div>
+        <div class="hint muted" style="margin-top:10px;">
+          Selecciona con checkbox. Cambios sincronizan Equipos/Turnos al instante.
+        </div>
       </div>
     `;
 
     const poolHint = $("opPoolHint");
     const status = $("opStatus");
 
-    if (poolIds.size < n) setStatus(poolHint, `Faltan ${n - poolIds.size} jugadores para completar N=${n}.`, "warn");
-    else if (poolIds.size === n && d === needSide && r === needSide) setStatus(poolHint, "✅ Pool completo y balanceado D/R.", "ok");
+    if (poolIds.size < n) setStatus(poolHint, `Faltan ${n - poolIds.size} para completar N=${n}.`, "warn");
+    else if (poolIds.size === n && d === needSide && r === needSide) setStatus(poolHint, "✅ Pool completo y balanceado.", "ok");
     else if (poolIds.size === n) setStatus(poolHint, `❌ Pool completo pero mix incorrecto. D=${d} R=${r}`, "error");
-    else setStatus(poolHint, "Selecciona/deselecciona: N se ajusta a múltiplos de 4.", "warn");
+    else setStatus(poolHint, "Ajusta selección: N se adapta a múltiplos de 4.", "warn");
 
     $("opAdd").addEventListener("click", () => {
       const name = norm($("opName").value);
@@ -259,9 +251,8 @@
           if (!id) return;
           if (cb.checked) poolIds.add(id);
           else poolIds.delete(id);
-
           persistPoolAndAutoN();
-          renderBase(); // refresca hints + N
+          renderBase();
         });
       });
 
@@ -277,6 +268,7 @@
           p.name = newName;
           saveJSON(KEY_PLAYERS, players);
           updateBadges();
+          notifyPoolChanged();
         });
       });
 
@@ -300,6 +292,7 @@
           p.rating = clamp(Number(inp.value || 5), 1, 10);
           inp.value = String(p.rating);
           saveJSON(KEY_PLAYERS, players);
+          notifyPoolChanged();
         });
       });
 
@@ -318,14 +311,14 @@
 
     searchEl.addEventListener("input", renderList);
     sortEl.addEventListener("change", renderList);
-
     renderList();
+
     updateBadges();
   }
 
   document.addEventListener("DOMContentLoaded", () => {
     renderBase();
     updateBadges();
-    console.log("✅ db.js listo (evento op:poolChanged)");
+    console.log("✅ db.js cargado");
   });
 })();
