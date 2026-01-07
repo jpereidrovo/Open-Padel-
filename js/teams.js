@@ -1,4 +1,9 @@
-// teams.js — Equipos A/B (se sincroniza en la MISMA pestaña con op:poolChanged)
+// teams.js — Equipos A/B (mejora UX: si pool cambia, NO borra equipos; pide confirmar)
+// Reglas:
+// - Si NO hay equipos armados => el pool manda (se ve y se usa normal).
+// - Si YA hay equipos armados y el pool cambia desde Base => muestra aviso "pool cambió".
+//   * Mientras esté el aviso, no aplica "pool manda" para evitar borrar cosas.
+//   * Puedes apretar "Reiniciar equipos y aplicar pool" para empezar desde el pool nuevo.
 
 (function () {
   const KEY_PLAYERS = "op_players_v1";
@@ -40,7 +45,10 @@
     return arr.reduce((s,p)=>s+p.rating,0) / arr.length;
   }
 
-  function normalize(players, pool, A, B) {
+  // Estado UX: si el pool cambió con equipos ya armados
+  let poolDirty = false;
+
+  function normalize(players, pool, A, B, applyPoolDominates) {
     const total = getTotalPlayers();
     const valid = new Set(players.map(p => p.id));
     const clean = (set) => new Set([...set].filter(id => valid.has(id)));
@@ -49,11 +57,15 @@
     A = clean(A);
     B = clean(B);
 
-    // pool manda: si está en pool, sale de A/B
-    for (const id of pool) { A.delete(id); B.delete(id); }
-
+    // no duplicar A/B
     for (const id of A) B.delete(id);
 
+    // Si estamos en modo normal => pool manda (si está en pool, sale de A/B)
+    if (applyPoolDominates) {
+      for (const id of pool) { A.delete(id); B.delete(id); }
+    }
+
+    // seguridad: pool no excede N
     if (pool.size > total) pool = new Set([...pool].slice(0, total));
 
     setPool(pool); setTeamA(A); setTeamB(B);
@@ -75,6 +87,8 @@
     }
 
     const A = new Set(), B = new Set();
+
+    // Semillas: top 2 D + top 2 R
     const seeds = [Ds.shift(), Rs.shift(), Ds.shift(), Rs.shift()].filter(Boolean);
     let sumA = 0, sumB = 0;
     for (const p of seeds) {
@@ -118,27 +132,46 @@
     let A = getTeamA();
     let B = getTeamB();
 
-    ({ pool, A, B } = normalize(players, pool, A, B));
+    const hadTeams = (A.size + B.size) > 0;
+    // Si hay equipos y poolDirty, NO aplicamos "pool manda" aún.
+    const applyPoolDominates = !poolDirty;
+
+    ({ pool, A, B } = normalize(players, pool, A, B, applyPoolDominates));
 
     const total = getTotalPlayers();
     const size = teamSize(total);
     const need = perTeamSide(total);
 
-    const poolArr = listFromIds(pool, players);
-    const aArr = listFromIds(A, players);
-    const bArr = listFromIds(B, players);
+    const poolArr = listFromIds(pool, players).sort((a,b)=>a.side.localeCompare(b.side) || b.rating-a.rating || a.name.localeCompare(b.name));
+    const aArr = listFromIds(A, players).sort((a,b)=>a.side.localeCompare(b.side) || b.rating-a.rating || a.name.localeCompare(b.name));
+    const bArr = listFromIds(B, players).sort((a,b)=>a.side.localeCompare(b.side) || b.rating-a.rating || a.name.localeCompare(b.name));
 
     const aD = countSide(A, players, "D"), aR = countSide(A, players, "R");
     const bD = countSide(B, players, "D"), bR = countSide(B, players, "R");
 
+    // Para marcar jugadores del pool que ya están en equipos (cuando poolDirty)
+    const inTeams = new Set([...A, ...B]);
+
     mount.innerHTML = `
       <div class="card" style="margin-top:10px;">
         <div class="hint muted">
-          N (desde Base): <b>${total}</b> • Pool: <b>${poolArr.length}/${total}</b><br/>
+          N (desde Base): <b>${total}</b> • Pool objetivo: <b>${total}</b> (D=${total/2}, R=${total/2})<br/>
           Cada equipo: <b>${size}</b> (D=${need}, R=${need})
         </div>
+
+        ${poolDirty ? `
+          <div class="hint warn" style="margin-top:10px;">
+            ⚠️ El pool cambió en Base mientras ya había equipos armados.<br/>
+            Si quieres aplicar el pool nuevo, reinicia equipos.
+            <div class="btns" style="margin-top:8px;">
+              <button class="primary" id="applyPoolBtn">Reiniciar equipos y aplicar pool</button>
+              <button class="ghost" id="keepTeamsBtn">Mantener equipos</button>
+            </div>
+          </div>
+        ` : ``}
+
         <div class="btns" style="margin-top:10px;">
-          <button class="primary" id="autoBtn">Autoarmar</button>
+          <button class="primary" id="autoBtn" ${poolDirty ? "disabled" : ""}>Autoarmar</button>
           <button class="ghost" id="clearBtn">Limpiar equipos</button>
         </div>
         <div class="hint" id="statusTeams" style="margin-top:8px;"></div>
@@ -146,7 +179,7 @@
 
       <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; margin-top:12px;">
         <div class="card">
-          <h3 style="margin:0 0 10px;">Pool</h3>
+          <h3 style="margin:0 0 10px;">Pool (${poolArr.length}/${total})</h3>
           <div id="poolList" style="display:grid; gap:8px;"></div>
         </div>
         <div class="card">
@@ -164,6 +197,7 @@
     const setStatus = (msg, kind) => { st.textContent = msg; st.className = "hint " + (kind || ""); };
 
     function canMoveToTeam(teamSet, p) {
+      if (poolDirty) return false; // mientras haya aviso, bloqueamos mover para evitar mezcla rara
       if (teamSet.size >= size) return false;
       const d = countSide(teamSet, players, "D");
       const r = countSide(teamSet, players, "R");
@@ -172,35 +206,73 @@
       return true;
     }
 
-    function row(p, actions) {
+    function cardRow(p, actionsHtml, extraBadgeHtml = "") {
       return `
         <div class="card" style="padding:10px 12px; background: rgba(0,0,0,.18);">
           <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
-            <div><b>${p.name}</b> <span class="pill">${p.side}</span> <span class="pill">${p.rating}</span></div>
-            <div class="btns">${actions}</div>
+            <div>
+              <b>${p.name}</b>
+              <span class="pill">${p.side}</span>
+              <span class="pill">${p.rating}</span>
+              ${extraBadgeHtml}
+            </div>
+            <div class="btns">${actionsHtml}</div>
           </div>
         </div>
       `;
     }
 
     $("poolList").innerHTML = poolArr.map(p => {
-      const disA = !canMoveToTeam(A, p);
-      const disB = !canMoveToTeam(B, p);
-      return row(p, `
+      const already = inTeams.has(p.id);
+      const badge = (poolDirty && already) ? `<span class="pill">en equipo</span>` : ``;
+
+      const disA = !canMoveToTeam(A, p) || already;
+      const disB = !canMoveToTeam(B, p) || already;
+
+      return cardRow(p, `
         <button class="ghost small" data-m="A" data-id="${p.id}" ${disA ? "disabled":""}>→ A</button>
         <button class="ghost small" data-m="B" data-id="${p.id}" ${disB ? "disabled":""}>→ B</button>
-      `);
+      `, badge);
     }).join("") || `<div class="hint muted">Vacío</div>`;
 
-    $("aList").innerHTML = aArr.map(p => row(p, `<button class="ghost small" data-m="POOL" data-id="${p.id}">← Pool</button>`)).join("") || `<div class="hint muted">Vacío</div>`;
-    $("bList").innerHTML = bArr.map(p => row(p, `<button class="ghost small" data-m="POOL" data-id="${p.id}">← Pool</button>`)).join("") || `<div class="hint muted">Vacío</div>`;
+    $("aList").innerHTML = aArr.map(p => cardRow(p, `
+      <button class="ghost small" data-m="POOL" data-id="${p.id}" ${poolDirty ? "disabled":""}>← Pool</button>
+    `)).join("") || `<div class="hint muted">Vacío</div>`;
 
+    $("bList").innerHTML = bArr.map(p => cardRow(p, `
+      <button class="ghost small" data-m="POOL" data-id="${p.id}" ${poolDirty ? "disabled":""}>← Pool</button>
+    `)).join("") || `<div class="hint muted">Vacío</div>`;
+
+    // Botones aviso pool cambiado
+    const applyBtn = $("applyPoolBtn");
+    if (applyBtn) {
+      applyBtn.addEventListener("click", () => {
+        setTeamA(new Set());
+        setTeamB(new Set());
+        poolDirty = false;
+        setStatus("Equipos reiniciados. Pool aplicado.", "ok");
+        render();
+      });
+    }
+    const keepBtn = $("keepTeamsBtn");
+    if (keepBtn) {
+      keepBtn.addEventListener("click", () => {
+        // mantener equipos, pero salimos de modo “dirty”
+        poolDirty = false;
+        setStatus("Se mantuvieron equipos. Si quieres usar el pool nuevo, reinicia equipos.", "warn");
+        render();
+      });
+    }
+
+    // mover manual (si no estamos en modo dirty)
     mount.querySelectorAll("[data-m]").forEach(btn => {
       btn.addEventListener("click", () => {
+        if (poolDirty) return;
         const id = btn.getAttribute("data-id");
         const move = btn.getAttribute("data-m");
         if (!id || !move) return;
 
+        const(animated behaviour)
         const p = players.find(x => x.id === id);
         if (!p) return;
 
@@ -220,7 +292,7 @@
           pool2.add(id);
         }
 
-        ({ pool: pool2, A: A2, B: B2 } = normalize(players, pool2, A2, B2));
+        ({ pool: pool2, A: A2, B: B2 } = normalize(players, pool2, A2, B2, true));
         render();
       });
     });
@@ -230,26 +302,37 @@
       setPool(pool2);
       setTeamA(new Set());
       setTeamB(new Set());
-      setStatus("Equipos limpiados.", "ok");
+      poolDirty = false;
+      setStatus("Equipos limpiados (devueltos al pool).", "ok");
       render();
     });
 
     $("autoBtn").addEventListener("click", () => {
+      if (poolDirty) return;
       const res = autoBuild(players, getPool());
       if (!res.ok) return setStatus(res.msg, "error");
+
       setTeamA(res.A);
       setTeamB(res.B);
       setPool(new Set());
+
       setStatus(res.msg, "ok");
       render();
     });
+
+    // Si pool está completo y no hay equipos, guía
+    if (!hadTeams && poolArr.length > 0 && poolArr.length < total) {
+      setStatus(`Selecciona ${total - poolArr.length} jugadores más en Base para completar N=${total}.`, "warn");
+    }
   }
 
-  // ✅ escucha el evento que dispara Base (misma pestaña)
+  // ✅ Evento que dispara Base en la misma pestaña
   window.addEventListener("op:poolChanged", () => {
-    // al cambiar pool en Base, limpiamos A/B para que el pool se vea siempre
-    setTeamA(new Set());
-    setTeamB(new Set());
+    const A = getTeamA();
+    const B = getTeamB();
+    if ((A.size + B.size) > 0) {
+      poolDirty = true;
+    }
     render();
   });
 
