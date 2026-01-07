@@ -1,4 +1,4 @@
-// turns.js — Turnos A vs B + marcador "63" + resultados por turno (1/2/3)
+// turns.js — Turnos A vs B + marcador 2 dígitos (63) + vista 6-3 + resultados limpios
 (function () {
   const KEY_PLAYERS = "op_players_v1";
   const KEY_TOTAL = "op_totalPlayers_v1";
@@ -7,13 +7,11 @@
 
   const $ = (id) => document.getElementById(id);
   const loadJSON = (k, fb) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fb; } catch { return fb; } };
-
   const ALLOWED_TOTALS = [4, 8, 12, 16, 20, 24];
 
   function getPlayers() { return loadJSON(KEY_PLAYERS, []); }
   function getTeamA() { return new Set(loadJSON(KEY_TEAM_A, [])); }
   function getTeamB() { return new Set(loadJSON(KEY_TEAM_B, [])); }
-
   function getTotalPlayers() {
     const v = Number(localStorage.getItem(KEY_TOTAL) || 16);
     return ALLOWED_TOTALS.includes(v) ? v : 16;
@@ -22,8 +20,6 @@
   function listFromIds(ids, players) {
     return [...ids].map(id => players.find(p => p.id === id)).filter(Boolean);
   }
-
-  function pairKey(dId, rId) { return `${dId}|${rId}`; }
 
   function shuffle(arr) {
     const a = arr.slice();
@@ -34,7 +30,9 @@
     return a;
   }
 
-  function buildPairs(Ds, Rs, usedPairs, maxTries = 3000) {
+  function pairKey(dId, rId) { return `${dId}|${rId}`; }
+
+  function buildPairs(Ds, Rs, usedPairs, maxTries = 4000) {
     const dIds = Ds.map(p => p.id);
     const rIds = Rs.map(p => p.id);
 
@@ -61,7 +59,19 @@
   function namePair(pair, playersAll) {
     const d = playersAll.find(p => p.id === pair.dId);
     const r = playersAll.find(p => p.id === pair.rId);
-    return `${(d?.name||"D?")} (D) + ${(r?.name||"R?")} (R)`;
+    return `${(d?.name||"D?")} + ${(r?.name||"R?")}`;
+  }
+
+  function fmtScore(raw) {
+    if (!raw || raw.length !== 2) return "";
+    return `${raw[0]}-${raw[1]}`;
+  }
+
+  function scoreWinner(raw) {
+    if (!raw || raw.length !== 2) return "";
+    const a = Number(raw[0]), b = Number(raw[1]);
+    if (a === b) return "";
+    return a > b ? "Equipo A" : "Equipo B";
   }
 
   function renderTurns() {
@@ -92,18 +102,19 @@
 
     mount.innerHTML = `
       <div class="card" style="margin-top:10px;">
-        <div class="hint muted">Cada cancha: 1 pareja A vs 1 pareja B. Cada pareja: 1D + 1R.</div>
-        ${err.length ? `<div class="hint error" style="margin-top:10px;">${err.join("<br/>")}</div>` : ""}
+        <div class="hint muted">Turnos: ${courts} canchas por turno • Parejas 1D+1R • A vs B</div>
+
+        <div id="turnsStatus" class="hint" style="margin-top:10px;"></div>
 
         <div style="display:grid; grid-template-columns: 1fr 1fr auto; gap:10px; margin-top:10px; align-items:end;">
           <div>
-            <label>Cantidad de turnos</label>
+            <label>Turnos</label>
             <select id="turnsCount">
               ${[1,2,3,4,5,6].map(n=>`<option value="${n}" ${n===3?"selected":""}>${n}</option>`).join("")}
             </select>
           </div>
           <div>
-            <label>Evitar repetir parejas</label>
+            <label>No repetir parejas</label>
             <select id="avoidPairs">
               <option value="yes" selected>Sí</option>
               <option value="no">No</option>
@@ -111,11 +122,9 @@
           </div>
           <div class="btns">
             <button class="primary" id="genTurns" ${err.length ? "disabled":""}>Generar</button>
-            <button class="ghost" id="regenTurns" disabled>Re-random</button>
+            <button class="ghost" id="regenTurns" disabled>Otra opción</button>
           </div>
         </div>
-
-        <div id="turnsStatus" class="hint" style="margin-top:10px;"></div>
       </div>
 
       <div id="turnsOut" style="margin-top:14px; display:grid; gap:12px;"></div>
@@ -130,73 +139,79 @@
     const resultsOut = $("resultsOut");
     const status = $("turnsStatus");
     const btnRegen = $("regenTurns");
-
-    let lastState = null;
+    const btnGen = $("genTurns");
 
     function setStatus(msg, kind) {
       status.textContent = msg;
       status.className = "hint " + (kind || "");
     }
 
+    if (err.length) setStatus("No se puede generar: " + err.join(" | "), "warn");
+    else setStatus(`Listo para generar • Equipos completos • A=${A.length} B=${B.length}`, "ok");
+
+    let lastState = null;
+
     function renderResults() {
       if (!lastState) { resultsOut.innerHTML = ""; return; }
 
+      const turnBlocks = [];
       let totalA = 0, totalB = 0;
-      const rows = [];
 
-      lastState.turns.forEach((turn, ti) => {
+      for (let ti = 0; ti < lastState.turns.length; ti++) {
         const weight = ti + 1;
+        const turn = lastState.turns[ti];
+
         let turnA = 0, turnB = 0;
 
-        turn.matches.forEach((m, mi) => {
+        const rows = turn.matches.map((m, mi) => {
           const key = `${ti}-${mi}`;
           const raw = lastState.scores[key] || "";
-          if (raw.length !== 2) return;
+          const winner = scoreWinner(raw);
+          const puntos = winner ? weight : 0;
 
-          const a = Number(raw[0]);
-          const b = Number(raw[1]);
-          if (a === b) return;
+          if (winner === "Equipo A") { turnA += puntos; totalA += puntos; }
+          if (winner === "Equipo B") { turnB += puntos; totalB += puntos; }
 
-          const winA = a > b;
-          if (winA) { turnA += weight; totalA += weight; }
-          else { turnB += weight; totalB += weight; }
+          return `
+            <div style="display:grid; grid-template-columns: 70px 1fr 80px 110px; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid rgba(255,255,255,.08);">
+              <div class="pill">Cancha ${mi+1}</div>
+              <div class="hint muted">
+                <b>A:</b> ${namePair(m.A, players)} &nbsp; vs &nbsp; <b>B:</b> ${namePair(m.B, players)}
+              </div>
+              <div style="font-weight:900; text-align:center;">${fmtScore(raw) || "—"}</div>
+              <div class="hint">${winner ? `Gana ${winner} (+${weight})` : "—"}</div>
+            </div>
+          `;
+        }).join("");
 
-          rows.push({ turno: ti+1, cancha: mi+1, marcador: `${a}-${b}`, ganador: winA ? "Equipo A" : "Equipo B", puntos: weight });
-        });
-
-        rows.push({ turno: ti+1, cancha: "—", marcador: "—", ganador: `Subtotal Turno ${ti+1}`, puntos: `A: ${turnA} • B: ${turnB}` });
-      });
+        turnBlocks.push(`
+          <div class="card" style="background: rgba(0,0,0,.18);">
+            <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+              <h3 style="margin:0;">Turno ${ti+1}</h3>
+              <div class="pill">Valor: ${weight}</div>
+            </div>
+            <div style="margin-top:10px;">${rows}</div>
+            <div style="margin-top:10px; font-weight:800;">
+              Subtotal Turno ${ti+1}: A <b>${turnA}</b> • B <b>${turnB}</b>
+            </div>
+          </div>
+        `);
+      }
 
       const winner = totalA === totalB ? "Empate" : (totalA > totalB ? "Gana Equipo A" : "Gana Equipo B");
 
       resultsOut.innerHTML = `
-        <div class="pill" style="margin-bottom:10px;">
-          Total A: <b>${totalA}</b> • Total B: <b>${totalB}</b> • <b>${winner}</b>
+        <div class="card" style="margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+            <h3 style="margin:0;">Resultado general</h3>
+            <div class="pill">${winner}</div>
+          </div>
+          <div style="margin-top:10px; font-size:18px; font-weight:900;">
+            A: ${totalA} &nbsp; • &nbsp; B: ${totalB}
+          </div>
         </div>
-
-        <div style="overflow:auto;">
-          <table style="width:100%; border-collapse:collapse;">
-            <thead>
-              <tr>
-                <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">Turno</th>
-                <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">Cancha</th>
-                <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">Marcador</th>
-                <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">Ganador</th>
-                <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">Puntos</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map(r => `
-                <tr>
-                  <td style="padding:8px; border-bottom:1px solid rgba(255,255,255,.08);">${r.turno}</td>
-                  <td style="padding:8px; border-bottom:1px solid rgba(255,255,255,.08);">${r.cancha}</td>
-                  <td style="padding:8px; border-bottom:1px solid rgba(255,255,255,.08);">${r.marcador}</td>
-                  <td style="padding:8px; border-bottom:1px solid rgba(255,255,255,.08);">${r.ganador}</td>
-                  <td style="padding:8px; border-bottom:1px solid rgba(255,255,255,.08);">${r.puntos}</td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table>
+        <div style="display:grid; gap:12px;">
+          ${turnBlocks.join("")}
         </div>
       `;
     }
@@ -205,18 +220,19 @@
       if (!lastState) return;
 
       turnsOut.innerHTML = lastState.turns.map((turn, ti) => {
-        const weight = ti + 1;
         return `
           <div class="card">
-            <h3 style="margin:0 0 10px;">Turno ${ti+1} (victoria vale ${weight})</h3>
-            <div style="display:grid; gap:10px;">
+            <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+              <h3 style="margin:0;">Turno ${ti+1}</h3>
+              <div class="pill">${courts} canchas</div>
+            </div>
+
+            <div style="display:grid; gap:10px; margin-top:12px;">
               ${turn.matches.map((m, mi) => {
                 const key = `${ti}-${mi}`;
                 const raw = lastState.scores[key] || "";
-                const a = raw[0] ?? "";
-                const b = raw[1] ?? "";
-                const display = raw.length === 2 ? `${a}-${b}` : "";
-                const winner = (raw.length===2 && a!==b) ? (a>b ? "Ganador: Equipo A" : "Ganador: Equipo B") : "";
+                const visual = fmtScore(raw);
+                const winner = scoreWinner(raw);
 
                 return `
                   <div class="card" style="background: rgba(0,0,0,.18); padding:12px;">
@@ -230,16 +246,19 @@
 
                       <div style="display:grid; gap:6px; justify-items:end;">
                         <label style="margin:0;">Marcador</label>
+
+                        <!-- Input SOLO 2 dígitos: nunca se bloquea el backspace -->
                         <input
                           data-score="${key}"
                           inputmode="numeric"
                           maxlength="2"
                           placeholder="63"
                           value="${raw}"
-                          style="width:90px; text-align:center; font-weight:800;"
+                          style="width:90px; text-align:center; font-weight:900;"
                         />
-                        <div class="hint muted">${display || "Escribe 2 dígitos (0–7), ej: 63"}</div>
-                        <div class="hint ${winner ? "ok" : "muted"}">${winner || ""}</div>
+
+                        <div style="font-size:18px; font-weight:900;">${visual || "—"}</div>
+                        <div class="hint ${winner ? "ok" : "muted"}">${winner ? `Gana ${winner}` : ""}</div>
                       </div>
                     </div>
                   </div>
@@ -257,6 +276,7 @@
           inp.value = v;
           lastState.scores[inp.dataset.score] = v;
           renderResults();
+          renderAll(); // refresca visual “6-3” inmediato
         });
       });
 
@@ -282,7 +302,7 @@
         const pairsB = buildPairs(BD, BR, avoidRepeats ? usedB : new Set(), 4000);
 
         if (!pairsA || !pairsB) {
-          return { ok:false, msg:`No pude generar Turno ${t+1} sin repetir parejas. Prueba desactivar “Evitar repetir parejas” o reduce turnos.` };
+          return { ok:false, msg:`No pude generar Turno ${t+1} sin repetir parejas. Desactiva “No repetir parejas” o reduce turnos.` };
         }
 
         if (avoidRepeats) {
@@ -290,10 +310,9 @@
           for (const p of pairsB) usedB.add(pairKey(p.dId, p.rId));
         }
 
+        const matches = [];
         const aSh = shuffle(pairsA);
         const bSh = shuffle(pairsB);
-
-        const matches = [];
         for (let c = 0; c < courts; c++) matches.push({ A: aSh[c], B: bSh[c] });
 
         turns.push({ matches });
@@ -302,32 +321,36 @@
       return { ok:true, turns };
     }
 
-    $("genTurns").addEventListener("click", () => {
-      const turnCount = Number($("turnsCount").value || 3);
-      const avoid = $("avoidPairs").value === "yes";
+    if (btnGen) {
+      btnGen.addEventListener("click", () => {
+        const turnCount = Number($("turnsCount").value || 3);
+        const avoid = $("avoidPairs").value === "yes";
 
-      const res = generate(turnCount, avoid);
-      if (!res.ok) {
-        lastState = null;
-        turnsOut.innerHTML = "";
-        resultsOut.innerHTML = "";
-        btnRegen.disabled = true;
-        return setStatus(res.msg, "error");
-      }
+        const res = generate(turnCount, avoid);
+        if (!res.ok) {
+          lastState = null;
+          turnsOut.innerHTML = "";
+          resultsOut.innerHTML = "";
+          btnRegen.disabled = true;
+          return setStatus(res.msg, "error");
+        }
 
-      lastState = { turns: res.turns, scores: {} };
-      btnRegen.disabled = false;
-      setStatus("✅ Turnos generados. Ingresa marcadores para ver resultados.", "ok");
-      renderAll();
-    });
+        lastState = { turns: res.turns, scores: {} };
+        btnRegen.disabled = false;
+        setStatus("✅ Turnos generados. Ingresa marcadores para ver resultados.", "ok");
+        renderAll();
+      });
+    }
 
-    $("regenTurns").addEventListener("click", () => {
-      $("genTurns").click();
-    });
+    if (btnRegen) {
+      btnRegen.addEventListener("click", () => {
+        if (btnGen && !btnGen.disabled) btnGen.click();
+      });
+    }
   }
 
-  // refresco al entrar a Turnos y cuando cambie el pool
   window.addEventListener("op:poolChanged", () => renderTurns());
+  window.addEventListener("op:teamsChanged", () => renderTurns());
 
   window.OP = window.OP || {};
   const prevRefresh = window.OP.refresh;
