@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Open Padel — Base + Equipos + Turnos</title>
+  <title>Open Padel</title>
 
   <!-- Supabase JS (v2) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -11,59 +11,164 @@
   <style>
     :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
     body { margin: 0; background: #0b1020; color: #eef2ff; }
-    .wrap { max-width: 1600px; margin: 0 auto; padding: 16px; }
-    h1 { margin: 6px 0 14px; font-size: 20px; }
-    h2 { margin: 0 0 10px; font-size: 16px; }
-    .grid { display: grid; grid-template-columns: 1.45fr 1fr 1fr 1.15fr; gap: 14px; }
-    .card { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 14px; }
-    label { display: block; font-size: 12px; opacity: .9; margin-bottom: 6px; }
-    input, select, button {
-      width: 100%; box-sizing: border-box;
-      border-radius: 12px; border: 1px solid rgba(255,255,255,.18);
-      background: rgba(0,0,0,.25); color: #eef2ff;
-      padding: 10px 12px; outline: none;
-    }
-    input[type="number"] { padding-right: 6px; }
-    input[type="checkbox"] { width: auto; transform: scale(1.1); }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .row3 { display: grid; grid-template-columns: 1.2fr .8fr .8fr; gap: 10px; }
-    .btns { display: flex; gap: 10px; flex-wrap: wrap; }
-    button { cursor: pointer; font-weight: 650; }
-    button.primary { background: #4f46e5; border-color: rgba(255,255,255,.2); }
-    button.ghost { background: transparent; }
-    button.small { padding: 7px 10px; border-radius: 10px; font-weight: 750; width: auto; }
-    button:disabled { opacity: .55; cursor: not-allowed; }
-    .hint { font-size: 12px; opacity: .85; line-height: 1.35; }
-    .pill { display: inline-flex; gap: 8px; align-items: center; padding: 6px 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; font-size: 12px; }
-    .error { color: #fecaca; }
-    .ok { color: #bbf7d0; }
-    .warn { color: #fde68a; }
-    .muted { opacity: .8; }
+    a { color: inherit; }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
-    .list { display: grid; gap: 10px; }
-    .turn { border: 1px solid rgba(255,255,255,.14); border-radius: 14px; overflow: hidden; }
-    .turn h3 { margin: 0; padding: 10px 12px; background: rgba(255,255,255,.06); font-size: 14px; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;}
-    .turn .content { padding: 12px; display: grid; gap: 10px; }
-    .court { padding: 10px 12px; border-radius: 12px; background: rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.12); display:grid; gap:6px;}
-    .scoreRow { display:grid; grid-template-columns: 1fr 180px; gap:10px; align-items:center; }
-
-    .table { display:grid; gap:8px; }
-
-    .dbRow {
+    /* Layout */
+    .appShell {
       display: grid;
-      grid-template-columns: auto 1.2fr .55fr .55fr auto auto;
+      grid-template-columns: 270px 1fr;
+      min-height: 100vh;
+    }
+    .sidebar {
+      background: rgba(255,255,255,.05);
+      border-right: 1px solid rgba(255,255,255,.12);
+      padding: 14px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      box-sizing: border-box;
+    }
+    .main {
+      padding: 16px;
+      box-sizing: border-box;
+    }
+
+    /* Sidebar */
+    .brand { display:flex; gap:10px; align-items:center; margin-bottom: 14px; }
+    .logo {
+      width: 38px; height: 38px; border-radius: 12px;
+      background: rgba(79,70,229,.35);
+      border: 1px solid rgba(255,255,255,.18);
+      display:flex; align-items:center; justify-content:center;
+      font-weight: 900;
+    }
+    .brandTitle { line-height: 1.1; }
+    .brandTitle b { display:block; }
+    .brandTitle span { font-size: 12px; opacity: .75; }
+
+    .nav {
+      display: grid;
       gap: 8px;
-      align-items: center;
+      margin: 14px 0 18px;
+    }
+    .navBtn {
+      width: 100%;
       padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(0,0,0,.20);
+      color: #eef2ff;
+      cursor: pointer;
+      text-align: left;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      font-weight: 750;
+    }
+    .navBtn.active {
+      background: rgba(79,70,229,.28);
+      border-color: rgba(255,255,255,.22);
+    }
+    .navBtn .tag {
+      font-size: 12px;
+      opacity:.85;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(0,0,0,.12);
+      font-weight: 800;
+    }
+
+    .sidebarCard {
+      background: rgba(0,0,0,.18);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 14px;
+      padding: 12px;
+      display:grid;
+      gap:10px;
+    }
+
+    /* Controls */
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .row3 { display:grid; grid-template-columns: 1.2fr .8fr .8fr; gap: 10px; }
+    .btns { display:flex; gap: 10px; flex-wrap: wrap; }
+    button, input, select {
+      box-sizing: border-box;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.18);
+      background: rgba(0,0,0,.25);
+      color: #eef2ff;
+      padding: 10px 12px;
+      outline: none;
+    }
+    button { cursor: pointer; font-weight: 750; }
+    button.primary { background: #4f46e5; border-color: rgba(255,255,255,.2); }
+    button.ghost { background: transparent; }
+    button.small { padding: 7px 10px; border-radius: 10px; width:auto; font-weight: 850; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+
+    label { display:block; font-size: 12px; opacity:.9; margin-bottom: 6px; }
+    .hint { font-size: 12px; opacity: .85; line-height: 1.35; }
+    .muted { opacity: .75; }
+    .ok { color:#bbf7d0; }
+    .warn { color:#fde68a; }
+    .error { color:#fecaca; }
+    .pill {
+      display:inline-flex; gap:8px; align-items:center;
+      padding: 6px 10px; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.14);
+      font-size: 12px;
+      background: rgba(0,0,0,.12);
+    }
+    .card {
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 14px;
+      padding: 14px;
+    }
+
+    /* Lists */
+    .table { display:grid; gap:8px; }
+    .dbRow {
+      display:grid;
+      grid-template-columns: auto 1.25fr .55fr .55fr auto auto;
+      gap:8px;
+      align-items:center;
+      padding:10px 12px;
+      border-radius: 12px;
       border: 1px solid rgba(255,255,255,.12);
       background: rgba(0,0,0,.18);
-      border-radius: 12px;
     }
-    .mini { font-size: 12px; opacity:.85; }
-    .badge { display:inline-flex; padding: 3px 8px; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; font-size: 12px; opacity:.95; justify-content:center; }
-    .split { display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; }
+    input[type="checkbox"] { width: auto; transform: scale(1.12); }
 
+    .dbRow input.nameInp, .dbRow select.sideSel, .dbRow input.ratingInp {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 10px;
+    }
+    .dbRow input.nameInp { font-weight: 850; }
+
+    .badge {
+      display:inline-flex; padding: 3px 8px;
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: 999px;
+      font-size: 12px;
+      opacity: .95;
+      font-weight: 850;
+    }
+
+    .split { display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; }
+    .sectionTitle { margin: 0 0 10px; font-size: 16px; }
+
+    /* Quedada layout */
+    .quedadaGrid {
+      display:grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 14px;
+      align-items:start;
+    }
     .teamList { display:grid; gap:8px; }
     .teamItem {
       display:grid;
@@ -71,229 +176,295 @@
       gap:10px;
       align-items:center;
       padding: 10px 12px;
+      border-radius: 12px;
       border: 1px solid rgba(255,255,255,.12);
       background: rgba(0,0,0,.18);
+    }
+
+    /* Turns */
+    .list { display:grid; gap:10px; }
+    .turn { border: 1px solid rgba(255,255,255,.14); border-radius: 14px; overflow:hidden; }
+    .turn h3 {
+      margin:0; padding: 10px 12px;
+      background: rgba(255,255,255,.06);
+      font-size: 14px;
+      display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;
+    }
+    .turn .content { padding: 12px; display:grid; gap:10px; }
+    .court {
+      padding: 10px 12px;
       border-radius: 12px;
+      background: rgba(0,0,0,.18);
+      border: 1px solid rgba(255,255,255,.12);
+      display:grid; gap:6px;
+    }
+    .scoreRow { display:grid; grid-template-columns: 1fr 190px; gap:10px; align-items:center; }
+    .mini { font-size: 12px; opacity:.85; }
+
+    /* Responsive */
+    @media (max-width: 1100px){
+      .appShell { grid-template-columns: 1fr; }
+      .sidebar { position: relative; height: auto; }
+      .quedadaGrid { grid-template-columns: 1fr; }
     }
 
-    .dbRow select, .dbRow input[type="number"], .dbRow input.nameInp{
-      width: 100%;
-      padding: 8px 10px;
-      border-radius: 10px;
-    }
-    .dbRow input.nameInp{ font-weight: 800; }
-
-    .topbar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
-    .authBox { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-    .authStatus { font-size: 12px; opacity:.85; }
-
-    @media (max-width: 1200px) { .grid { grid-template-columns: 1fr; } }
-
+    /* Print (PDF) */
     @media print {
       body { background: white; color: black; }
+      .sidebar, .noPrint { display:none !important; }
       .card { border: 1px solid #ddd; background: white; }
-      button, select, input, .hint, .pill, #controlsCard, #authCard { display: none !important; }
-      .wrap { max-width: none; padding: 0; }
-      .turn { border: 1px solid #ddd; }
-      .court { border: 1px solid #ddd; background: white; }
+      .turn, .court { border: 1px solid #ddd; background: white; }
       code { color: black; }
     }
   </style>
 </head>
 
 <body>
-<div class="wrap">
-  <div class="topbar">
-    <div>
-      <h1 style="margin:0;">Open Padel — Base + Equipos A/B + Turnos</h1>
-      <div class="hint muted">Pareja = <b>D + R</b> • Turnos = <b>3</b> • Canchas/turno = N/4</div>
-    </div>
-
-    <div class="card" id="authCard" style="padding:10px 12px; margin:0;">
-      <div class="authBox">
-        <span class="authStatus" id="authStatus">Cargando sesión…</span>
-        <button class="primary small" id="loginBtn">Iniciar sesión con Google</button>
-        <button class="ghost small" id="logoutBtn" style="display:none">Cerrar sesión</button>
+<div class="appShell">
+  <!-- SIDEBAR -->
+  <aside class="sidebar noPrint">
+    <div class="brand">
+      <div class="logo">OP</div>
+      <div class="brandTitle">
+        <b>Open Padel</b>
+        <span>Base + Quedadas</span>
       </div>
     </div>
-  </div>
 
-  <div id="appRoot" style="display:none;">
-    <div class="hint" style="margin-bottom:12px;">
-      <span class="pill" id="pillPlayers">Jugadores: <b>16</b></span>
-      <span class="pill" id="pillCourts">Canchas/turno: <b>4</b></span>
-      <span class="pill">No repetir parejas</span>
-      <span class="pill">Marcador por cancha</span>
+    <div class="sidebarCard" id="authCard">
+      <div class="hint" id="authStatus">Cargando sesión…</div>
+      <div class="btns">
+        <button class="primary small" id="loginBtn">Google</button>
+        <button class="ghost small" id="logoutBtn" style="display:none">Salir</button>
+      </div>
     </div>
 
-    <div class="grid">
-      <!-- BASE + SELECCIÓN -->
-      <div class="card" id="controlsCard">
-        <div class="split">
-          <h2>Base + Selección</h2>
-          <div class="mini" id="dbCount"></div>
-        </div>
+    <div class="nav" style="margin-top: 14px;">
+      <button class="navBtn active" id="navBase">
+        <span>👤 Base de jugadores</span>
+        <span class="tag" id="tagBase">0</span>
+      </button>
+      <button class="navBtn" id="navQuedada">
+        <span>🎾 Quedada</span>
+        <span class="tag" id="tagQuedada">0/16</span>
+      </button>
+    </div>
 
-        <div class="row">
-          <div>
-            <label>Cantidad de jugadores a jugar</label>
-            <select id="totalPlayers">
-              <option value="4">4</option>
-              <option value="8">8</option>
-              <option value="12">12</option>
-              <option value="16" selected>16</option>
-              <option value="20">20</option>
-              <option value="24">24</option>
-            </select>
-          </div>
-          <div>
-            <label>Estado de selección</label>
-            <div class="pill" id="selPill" style="width:100%;justify-content:space-between;">
+    <div class="sidebarCard">
+      <div class="hint">
+        <b>Flujo recomendado</b><br/>
+        1) En <b>Base</b> agrega/edita y selecciona jugadores.<br/>
+        2) En <b>Quedada</b> arma A/B y genera turnos.
+      </div>
+      <div class="pill" id="pillInfo">N: <b>16</b> • Canchas: <b>4</b></div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+    <div id="appRoot" style="display:none;">
+      <!-- BASE VIEW -->
+      <section id="viewBase">
+        <div class="card">
+          <div class="split">
+            <h2 class="sectionTitle">Base de jugadores</h2>
+            <div class="pill" id="selPill">
               <span id="selCountText">0/16</span>
               <span class="muted" id="selSideText">D:0 R:0</span>
             </div>
-            <div class="mini" id="selNeedText" style="margin-top:6px;"></div>
+          </div>
+
+          <div class="row">
+            <div>
+              <label>Cantidad de jugadores a jugar</label>
+              <select id="totalPlayers">
+                <option value="4">4</option>
+                <option value="8">8</option>
+                <option value="12">12</option>
+                <option value="16" selected>16</option>
+                <option value="20">20</option>
+                <option value="24">24</option>
+              </select>
+            </div>
+            <div>
+              <label>Estado de mix (D/R)</label>
+              <div class="hint" id="selNeedText"></div>
+            </div>
+          </div>
+
+          <div style="height:10px"></div>
+          <div class="btns">
+            <button class="ghost" id="clearSelection">Limpiar selección</button>
+            <button class="primary" id="goQuedada">Ir a Quedada →</button>
           </div>
         </div>
 
-        <div style="height:10px"></div>
-        <div class="btns">
-          <button class="primary" id="autoTeams">Autoarmar equipos A/B (balanceado)</button>
-          <button class="ghost" id="clearSelection">Limpiar selección</button>
-        </div>
+        <div style="height:14px"></div>
 
-        <div style="height:10px"></div>
-
-        <h2 style="margin-top:10px;">Agregar jugador a la base</h2>
-        <div class="row3">
-          <div>
-            <label>Nombre</label>
-            <input id="dbName" placeholder="Ej: Juan" />
+        <div class="card">
+          <h2 class="sectionTitle">Agregar jugador</h2>
+          <div class="row3">
+            <div>
+              <label>Nombre</label>
+              <input id="dbName" placeholder="Ej: Juan" />
+            </div>
+            <div>
+              <label>Lado</label>
+              <select id="dbSide">
+                <option value="D">Derecha (D)</option>
+                <option value="R">Revés (R)</option>
+              </select>
+            </div>
+            <div>
+              <label>Nivel (1–10)</label>
+              <input id="dbRating" type="number" min="1" max="10" value="5" />
+            </div>
           </div>
-          <div>
-            <label>Lado</label>
-            <select id="dbSide">
-              <option value="D">Derecha (D)</option>
-              <option value="R">Revés (R)</option>
-            </select>
+
+          <div style="height:10px"></div>
+          <div class="btns">
+            <button class="primary" id="dbAdd">Agregar</button>
           </div>
-          <div>
-            <label>Nivel (1–10)</label>
-            <input id="dbRating" type="number" min="1" max="10" value="5" />
+
+          <div id="dbStatus" class="hint" style="margin-top:10px;"></div>
+        </div>
+
+        <div style="height:14px"></div>
+
+        <div class="card">
+          <div class="split">
+            <h2 class="sectionTitle">Lista (editar + seleccionar)</h2>
+            <div class="hint muted" id="dbCount"></div>
           </div>
-        </div>
 
-        <div style="height:10px"></div>
-        <div class="btns">
-          <button class="primary" id="dbAdd">Agregar</button>
-        </div>
-
-        <div style="height:12px"></div>
-
-        <div class="row">
-          <div>
-            <label>Buscar</label>
-            <input id="dbSearch" placeholder="Filtrar por nombre..." />
+          <div class="row">
+            <div>
+              <label>Buscar</label>
+              <input id="dbSearch" placeholder="Filtrar por nombre..." />
+            </div>
+            <div>
+              <label>Ordenar</label>
+              <select id="dbSort">
+                <option value="name">Nombre</option>
+                <option value="ratingDesc">Nivel (mayor→menor)</option>
+                <option value="ratingAsc">Nivel (menor→mayor)</option>
+                <option value="side">Lado (D/R)</option>
+              </select>
+            </div>
           </div>
-          <div>
-            <label>Ordenar</label>
-            <select id="dbSort">
-              <option value="name">Nombre</option>
-              <option value="ratingDesc">Nivel (mayor→menor)</option>
-              <option value="ratingAsc">Nivel (menor→mayor)</option>
-              <option value="side">Lado (D/R)</option>
-            </select>
-          </div>
-        </div>
 
-        <div style="height:12px"></div>
-        <div class="table" id="dbList"></div>
+          <div style="height:12px"></div>
+          <div class="table" id="dbList"></div>
 
-        <div id="dbStatus" class="hint" style="margin-top:10px;"></div>
-        <div class="hint muted" style="margin-top:8px;">
-          ✔ Edita en la lista: <b>nombre</b>, <b>D/R</b>, <b>nivel</b>.<br/>
-          ✔ Selecciona con checkbox (te bloquea si te pasas del mix D/R).
-        </div>
-      </div>
-
-      <!-- POOL -->
-      <div class="card">
-        <div class="split">
-          <h2>Seleccionados (Pool)</h2>
-          <div class="mini" id="poolInfo"></div>
-        </div>
-        <div class="teamList" id="poolList"></div>
-        <div id="poolStatus" class="hint" style="margin-top:10px;"></div>
-      </div>
-
-      <!-- EQUIPO A -->
-      <div class="card">
-        <div class="split">
-          <h2>Equipo A</h2>
-          <div class="mini" id="teamAInfo"></div>
-        </div>
-        <div class="teamList" id="teamAList"></div>
-        <div style="height:10px"></div>
-        <div class="btns">
-          <button class="ghost" id="teamAClear">Vaciar A</button>
-        </div>
-        <div id="teamAStatus" class="hint"></div>
-      </div>
-
-      <!-- EQUIPO B + TURNOS -->
-      <div class="card">
-        <div class="split">
-          <h2>Equipo B</h2>
-          <div class="mini" id="teamBInfo"></div>
-        </div>
-        <div class="teamList" id="teamBList"></div>
-
-        <div style="height:10px"></div>
-        <div class="btns">
-          <button class="ghost" id="teamBClear">Vaciar B</button>
-        </div>
-        <div id="teamBStatus" class="hint"></div>
-
-        <hr style="border:none;border-top:1px solid rgba(255,255,255,.12);margin:14px 0;" />
-
-        <h2>Turnos</h2>
-        <div class="row">
-          <div>
-            <label>No repetir parejas (A ni B)</label>
-            <select id="noRepeatPairs">
-              <option value="yes" selected>Sí</option>
-              <option value="no">No</option>
-            </select>
-          </div>
-          <div>
-            <label>Exportar</label>
-            <select id="exportMode">
-              <option value="csv">Excel (CSV)</option>
-              <option value="pdf">PDF (Imprimir)</option>
-            </select>
+          <div class="hint muted" style="margin-top:10px;">
+            ✔ Edita: nombre, D/R y nivel. ✔ Selecciona con checkbox (respeta mix D/R).
           </div>
         </div>
+      </section>
 
-        <div style="height:10px"></div>
-        <div class="btns">
-          <button class="primary" id="gen">Generar 3 turnos</button>
-          <button class="ghost" id="export">Exportar</button>
-          <button class="ghost" id="copy">Copiar</button>
-          <button class="ghost" id="clearAll">Limpiar todo (menos base)</button>
+      <!-- QUEDADA VIEW -->
+      <section id="viewQuedada" style="display:none;">
+        <div class="card">
+          <div class="split">
+            <h2 class="sectionTitle">Quedada</h2>
+            <div class="pill" id="poolInfo">0/16 • D:0 R:0</div>
+          </div>
+
+          <div class="btns">
+            <button class="primary" id="autoTeams">Autoarmar A/B (balanceado)</button>
+            <button class="ghost" id="clearAll">Limpiar quedada</button>
+            <button class="ghost" id="backBase">← Volver a Base</button>
+          </div>
+
+          <div id="status" class="hint" style="margin-top:10px;"></div>
+
+          <div style="height:10px"></div>
+          <div class="pill" id="pillPlayers">N: <b>16</b></div>
+          <div class="pill" id="pillCourts">Canchas/turno: <b>4</b></div>
         </div>
 
-        <div id="status" class="hint" style="margin-top:10px;"></div>
+        <div style="height:14px"></div>
 
-        <div style="height:12px"></div>
-        <label>Resultado</label>
-        <div id="out" class="list"></div>
+        <div class="quedadaGrid">
+          <div class="card">
+            <div class="split">
+              <h2 class="sectionTitle">Pool</h2>
+              <div class="hint muted">Mueve a A o B</div>
+            </div>
+            <div class="teamList" id="poolList"></div>
+            <div id="poolStatus" class="hint" style="margin-top:10px;"></div>
+          </div>
 
-        <div class="hint muted" style="margin-top:12px;">
-          PDF: Exportar → se abre impresión → <b>Guardar como PDF</b>.
+          <div class="card">
+            <div class="split">
+              <h2 class="sectionTitle">Equipo A</h2>
+              <div class="hint muted" id="teamAInfo"></div>
+            </div>
+            <div class="teamList" id="teamAList"></div>
+            <div style="height:10px"></div>
+            <div class="btns">
+              <button class="ghost" id="teamAClear">Vaciar A</button>
+            </div>
+            <div id="teamAStatus" class="hint"></div>
+          </div>
+
+          <div class="card">
+            <div class="split">
+              <h2 class="sectionTitle">Equipo B</h2>
+              <div class="hint muted" id="teamBInfo"></div>
+            </div>
+            <div class="teamList" id="teamBList"></div>
+            <div style="height:10px"></div>
+            <div class="btns">
+              <button class="ghost" id="teamBClear">Vaciar B</button>
+            </div>
+            <div id="teamBStatus" class="hint"></div>
+
+            <hr style="border:none;border-top:1px solid rgba(255,255,255,.12);margin:14px 0;" />
+
+            <h2 class="sectionTitle">Turnos</h2>
+            <div class="row">
+              <div>
+                <label>No repetir parejas</label>
+                <select id="noRepeatPairs">
+                  <option value="yes" selected>Sí</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+              <div>
+                <label>Exportar</label>
+                <select id="exportMode">
+                  <option value="csv">Excel (CSV)</option>
+                  <option value="pdf">PDF (Imprimir)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="height:10px"></div>
+            <div class="btns">
+              <button class="primary" id="gen">Generar 3 turnos</button>
+              <button class="ghost" id="export">Exportar</button>
+              <button class="ghost" id="copy">Copiar</button>
+            </div>
+          </div>
         </div>
-      </div>
+
+        <div style="height:14px"></div>
+        <div class="card">
+          <h2 class="sectionTitle">Cruces</h2>
+          <div id="out" class="list"></div>
+          <div class="hint muted" style="margin-top:10px;">
+            PDF: Exportar → imprimir → Guardar como PDF.
+          </div>
+        </div>
+      </section>
     </div>
-  </div>
+
+    <div id="loggedOut" class="card" style="display:none;">
+      <h2 class="sectionTitle">Inicia sesión</h2>
+      <div class="hint">Usa el botón Google en la barra lateral.</div>
+    </div>
+  </main>
 </div>
 
 <script>
@@ -308,6 +479,18 @@
   const loginBtn = document.getElementById("loginBtn");
   const logoutBtn = document.getElementById("logoutBtn");
   const appRoot = document.getElementById("appRoot");
+  const loggedOut = document.getElementById("loggedOut");
+
+  const navBase = document.getElementById("navBase");
+  const navQuedada = document.getElementById("navQuedada");
+  const viewBase = document.getElementById("viewBase");
+  const viewQuedada = document.getElementById("viewQuedada");
+  const goQuedada = document.getElementById("goQuedada");
+  const backBase = document.getElementById("backBase");
+
+  const tagBase = document.getElementById("tagBase");
+  const tagQuedada = document.getElementById("tagQuedada");
+  const pillInfo = document.getElementById("pillInfo");
 
   if (!window.supabase || !window.supabase.createClient) {
     authStatusEl.textContent = "Error: no cargó Supabase JS.";
@@ -330,23 +513,20 @@
   });
 
   // =====================
-  // App state (local)
+  // App state
   // =====================
-  const STORE_STATE = "open_padel_state_v_cloud_1";
-  const STORE_SCORES = "open_padel_scores_v_cloud_1";
+  const STORE_STATE = "open_padel_state_sidebar_v1";
+  const STORE_SCORES = "open_padel_scores_sidebar_v1";
   const TURNS = 3;
 
   const $ = (id)=>document.getElementById(id);
 
-  // UI refs
+  // Base UI refs
   const totalPlayersEl = $("totalPlayers");
-  const pillPlayers = $("pillPlayers");
-  const pillCourts = $("pillCourts");
-
   const selCountText = $("selCountText");
   const selSideText = $("selSideText");
   const selNeedText = $("selNeedText");
-  const poolInfo = $("poolInfo");
+  const selPill = $("selPill");
 
   const dbName = $("dbName");
   const dbSide = $("dbSide");
@@ -357,10 +537,11 @@
   const dbList = $("dbList");
   const dbCount = $("dbCount");
   const dbStatus = $("dbStatus");
-
   const clearSelectionBtn = $("clearSelection");
-  const autoTeamsBtn = $("autoTeams");
 
+  // Quedada UI refs
+  const poolInfo = $("poolInfo");
+  const status = $("status");
   const poolList = $("poolList");
   const poolStatus = $("poolStatus");
 
@@ -372,49 +553,49 @@
   const teamBClear = $("teamBClear");
   const teamAStatus = $("teamAStatus");
   const teamBStatus = $("teamBStatus");
+  const autoTeamsBtn = $("autoTeams");
+  const clearAllBtn = $("clearAll");
 
   const noRepeatPairsEl = $("noRepeatPairs");
   const exportModeEl = $("exportMode");
   const genBtn = $("gen");
   const exportBtn = $("export");
   const copyBtn = $("copy");
-  const clearAllBtn = $("clearAll");
-  const status = $("status");
   const out = $("out");
 
-  /** @typedef {{id:string, name:string, side:'D'|'R', rating:number}} PlayerDB */
+  const pillPlayers = $("pillPlayers");
+  const pillCourts = $("pillCourts");
 
+  /** @typedef {{id:string, name:string, side:'D'|'R', rating:number}} PlayerDB */
   /** @type {PlayerDB[]} */ let db = [];
   /** @type {{id:string}[]} */ let selected = []; // pool
   /** @type {{id:string}[]} */ let teamA = [];
   /** @type {{id:string}[]} */ let teamB = [];
   /** @type {Map<string,string>} */ let scores = new Map();
 
+  // =====================
+  // Helpers
+  // =====================
   function totalPlayers(){ return Number(totalPlayersEl.value); }
   function teamSize(){ return totalPlayers() / 2; }
   function courts(){ return totalPlayers() / 4; }
-  function perTeamSide(){ return teamSize() / 2; } // D and R per team
-  function totalPerSide(){ return totalPlayers() / 2; } // total D and total R in selection
+  function perTeamSide(){ return teamSize() / 2; }
+  function totalPerSide(){ return totalPlayers() / 2; }
+
+  function normalizeName(s){ return (s ?? "").trim().replace(/\s+/g," "); }
+  function escapeHtml(s) {
+    return String(s ?? "")
+      .replaceAll("&","&amp;").replaceAll("<","&lt;")
+      .replaceAll(">","&gt;").replaceAll('"',"&quot;");
+  }
+  function escapeHtmlAttr(s){ return escapeHtml(s).replaceAll("'","&#39;"); }
 
   function setStatus(el, msg, kind="") {
     el.className = "hint " + (kind==="error" ? "error" : kind==="ok" ? "ok" : kind==="warn" ? "warn" : "");
     el.textContent = msg;
   }
 
-  function byId(id) { return db.find(p => p.id === id) || null; }
-
-  function normalizeName(s){
-    return (s ?? "").trim().replace(/\s+/g," ");
-  }
-
-  function escapeHtml(s) {
-    return String(s ?? "")
-      .replaceAll("&","&amp;")
-      .replaceAll("<","&lt;")
-      .replaceAll(">","&gt;")
-      .replaceAll('"',"&quot;");
-  }
-  function escapeHtmlAttr(s){ return escapeHtml(s).replaceAll("'","&#39;"); }
+  function byId(id){ return db.find(p => p.id === id) || null; }
 
   function countSide(refs, side) {
     return refs.reduce((acc, r) => {
@@ -436,7 +617,8 @@
     try {
       localStorage.setItem(STORE_STATE, JSON.stringify({
         totalPlayers: totalPlayers(),
-        selected, teamA, teamB
+        selected, teamA, teamB,
+        view: getView()
       }));
       localStorage.setItem(STORE_SCORES, JSON.stringify(Object.fromEntries(scores)));
     } catch {}
@@ -454,13 +636,46 @@
         selected = Array.isArray(st.selected) ? st.selected : [];
         teamA = Array.isArray(st.teamA) ? st.teamA : [];
         teamB = Array.isArray(st.teamB) ? st.teamB : [];
+        if (st.view === "quedada") setView("quedada"); else setView("base");
+      } else {
+        setView("base");
       }
+
       if (rawScores) {
         const o = JSON.parse(rawScores) || {};
         scores = new Map(Object.entries(o));
       }
-    } catch {}
+    } catch {
+      setView("base");
+    }
   }
+
+  // =====================
+  // Navigation (sidebar)
+  // =====================
+  function setView(view){
+    if(view === "quedada"){
+      viewBase.style.display = "none";
+      viewQuedada.style.display = "block";
+      navBase.classList.remove("active");
+      navQuedada.classList.add("active");
+    } else {
+      viewBase.style.display = "block";
+      viewQuedada.style.display = "none";
+      navBase.classList.add("active");
+      navQuedada.classList.remove("active");
+    }
+    saveLocalState();
+  }
+
+  function getView(){
+    return viewQuedada.style.display === "block" ? "quedada" : "base";
+  }
+
+  navBase.addEventListener("click", ()=>setView("base"));
+  navQuedada.addEventListener("click", ()=>setView("quedada"));
+  goQuedada.addEventListener("click", ()=>setView("quedada"));
+  backBase.addEventListener("click", ()=>setView("base"));
 
   // =====================
   // Supabase DB functions
@@ -482,10 +697,16 @@
   }
 
   // =====================
-  // Rendering helpers
+  // Rendering (Base + Quedada)
   // =====================
+  function renderSidebarBadges(){
+    tagBase.textContent = String(db.length);
+    tagQuedada.textContent = `${selected.length + teamA.length + teamB.length}/${totalPlayers()}`;
+    pillInfo.innerHTML = `N: <b>${totalPlayers()}</b> • Canchas: <b>${courts()}</b>`;
+  }
+
   function renderPills(){
-    pillPlayers.innerHTML = `Jugadores: <b>${totalPlayers()}</b>`;
+    pillPlayers.innerHTML = `N: <b>${totalPlayers()}</b>`;
     pillCourts.innerHTML = `Canchas/turno: <b>${courts()}</b>`;
   }
 
@@ -493,6 +714,7 @@
     const d = countSide(selected,"D");
     const r = countSide(selected,"R");
     const need = totalPerSide();
+    const totalPicked = selected.length + teamA.length + teamB.length;
 
     selCountText.textContent = `${selected.length}/${totalPlayers()}`;
     selSideText.textContent = `D:${d} R:${r}`;
@@ -502,24 +724,24 @@
     const rDiff = need - r;
 
     if(selected.length < totalPlayers()){
-      msg += `Faltan ${totalPlayers()-selected.length} jugadores`;
+      msg += `Faltan ${totalPlayers()-selected.length} en el pool`;
       if(dDiff>0 || rDiff>0) msg += ` | faltan D:${Math.max(0,dDiff)} R:${Math.max(0,rDiff)}`;
       if(dDiff<0 || rDiff<0) msg += ` | sobran D:${Math.max(0,-dDiff)} R:${Math.max(0,-rDiff)}`;
-      selNeedText.className = "mini warn";
+      selNeedText.className = "hint warn";
     } else {
       if(d===need && r===need){
         msg += "✅ Selección correcta (mix D/R OK).";
-        selNeedText.className = "mini ok";
+        selNeedText.className = "hint ok";
       } else {
         msg += `❌ Mix incorrecto: `;
         if(d!==need) msg += `D=${d} `;
         if(r!==need) msg += `R=${r} `;
-        selNeedText.className = "mini error";
+        selNeedText.className = "hint error";
       }
     }
-
     selNeedText.textContent = msg;
-    poolInfo.textContent = `${selected.length}/${totalPlayers()} • D:${d} R:${r} • prom:${avgRating(selected)}`;
+
+    poolInfo.textContent = `${totalPicked}/${totalPlayers()} • D:${countSide(selected,"D")+countSide(teamA,"D")+countSide(teamB,"D")} R:${countSide(selected,"R")+countSide(teamA,"R")+countSide(teamB,"R")} • prom pool:${avgRating(selected)}`;
   }
 
   function renderDB(){
@@ -542,10 +764,11 @@
       const isSel = selected.some(r=>r.id===p.id);
       const isInTeams = teamA.some(r=>r.id===p.id) || teamB.some(r=>r.id===p.id);
 
+      // Checkbox rules: cannot exceed total N or exceed D/R requirement (pool only)
       const dNow = countSide(selected,"D");
       const rNow = countSide(selected,"R");
-      const wouldBeD = p.side==="D" ? dNow+ (isSel?0:1) : dNow;
-      const wouldBeR = p.side==="R" ? rNow+ (isSel?0:1) : rNow;
+      const wouldBeD = p.side==="D" ? dNow + (isSel?0:1) : dNow;
+      const wouldBeR = p.side==="R" ? rNow + (isSel?0:1) : rNow;
       const selFull = selected.length >= maxSel;
 
       const disablePick =
@@ -560,7 +783,7 @@
 
         <div>
           <input class="nameInp" data-id="${p.id}" value="${escapeHtmlAttr(normalizeName(p.name))}" />
-          <div class="mini muted">${isInTeams ? "En A/B" : (isSel ? "Seleccionado" : "Disponible")}</div>
+          <div class="mini muted">${isInTeams ? "En A/B" : (isSel ? "En pool" : "Disponible")}</div>
         </div>
 
         <select class="sideSel" data-id="${p.id}">
@@ -576,6 +799,7 @@
       dbList.appendChild(row);
     }
 
+    // Checkbox select/deselect (pool)
     dbList.querySelectorAll("input.pickCb").forEach(cb=>{
       cb.addEventListener("change", ()=>{
         const id = cb.getAttribute("data-id");
@@ -587,7 +811,7 @@
         if(cb.checked){
           if(selected.length >= totalPlayers()){
             cb.checked = false;
-            return setStatus(dbStatus, `Ya tienes ${totalPlayers()} seleccionados.`, "error");
+            return setStatus(dbStatus, `Ya tienes ${totalPlayers()} seleccionados en el pool.`, "error");
           }
           if(teamA.some(r=>r.id===id) || teamB.some(r=>r.id===id)){
             cb.checked = false;
@@ -598,11 +822,11 @@
           const need = totalPerSide();
           if(p.side==="D" && dNow >= need){
             cb.checked = false;
-            return setStatus(dbStatus, `Ya tienes ${need} Derecha (D).`, "warn");
+            return setStatus(dbStatus, `Ya tienes ${need} Derecha (D) en el pool.`, "warn");
           }
           if(p.side==="R" && rNow >= need){
             cb.checked = false;
-            return setStatus(dbStatus, `Ya tienes ${need} Revés (R).`, "warn");
+            return setStatus(dbStatus, `Ya tienes ${need} Revés (R) en el pool.`, "warn");
           }
           selected.push({id});
         }else{
@@ -618,6 +842,7 @@
       });
     });
 
+    // Edit name (on blur)
     dbList.querySelectorAll("input.nameInp").forEach(inp=>{
       const apply = async ()=>{
         const id = inp.getAttribute("data-id");
@@ -649,13 +874,13 @@
           }
         }
       };
-
       inp.addEventListener("blur", apply);
       inp.addEventListener("keydown", (e)=>{
         if(e.key === "Enter"){ e.preventDefault(); inp.blur(); }
       });
     });
 
+    // Edit side inline (block if breaks pool mix)
     dbList.querySelectorAll("select.sideSel").forEach(sel=>{
       sel.addEventListener("change", async ()=>{
         const id = sel.getAttribute("data-id");
@@ -695,6 +920,7 @@
       });
     });
 
+    // Edit rating inline
     dbList.querySelectorAll("input.ratingInp").forEach(inp=>{
       inp.addEventListener("change", async ()=>{
         const id = inp.getAttribute("data-id");
@@ -716,6 +942,7 @@
       });
     });
 
+    // Move to A/B
     dbList.querySelectorAll("button").forEach(btn=>{
       btn.addEventListener("click", ()=>{
         const act = btn.getAttribute("data-act");
@@ -738,18 +965,14 @@
       item.innerHTML = `
         <div>
           <div><b>${escapeHtml(normalizeName(p.name))}</b> <span class="badge">${p.side}</span> <span class="badge">${p.rating}</span></div>
-          <div class="mini muted">Seleccionado</div>
+          <div class="mini muted">Pool</div>
         </div>
-        <button class="ghost small" data-act="toA" data-id="${p.id}" ${teamA.length>=teamSize() ? "disabled":""}>→ A</button>
-        <button class="ghost small" data-act="toB" data-id="${p.id}" ${teamB.length>=teamSize() ? "disabled":""}>→ B</button>
+        <button class="ghost small" ${teamA.length>=teamSize() ? "disabled":""}>→ A</button>
+        <button class="ghost small" ${teamB.length>=teamSize() ? "disabled":""}>→ B</button>
       `;
-      item.querySelectorAll("button").forEach(btn=>{
-        btn.addEventListener("click", ()=>{
-          const act = btn.getAttribute("data-act");
-          if(act==="toA") moveSelectedToTeam(p.id, "A");
-          if(act==="toB") moveSelectedToTeam(p.id, "B");
-        });
-      });
+      const [btnA, btnB] = item.querySelectorAll("button");
+      btnA.addEventListener("click", ()=>moveSelectedToTeam(p.id, "A"));
+      btnB.addEventListener("click", ()=>moveSelectedToTeam(p.id, "B"));
       poolList.appendChild(item);
     }
   }
@@ -768,11 +991,12 @@
             <div><b>${escapeHtml(normalizeName(p.name))}</b> <span class="badge">${p.side}</span> <span class="badge">${p.rating}</span></div>
             <div class="mini muted">${label}</div>
           </div>
-          <button class="ghost small" data-act="back" data-id="${p.id}">← Pool</button>
-          <button class="ghost small" data-act="remove" data-id="${p.id}">Quitar</button>
+          <button class="ghost small">← Pool</button>
+          <button class="ghost small">Quitar</button>
         `;
 
-        item.querySelector('[data-act="back"]').addEventListener("click", ()=>{
+        const [backBtn, rmBtn] = item.querySelectorAll("button");
+        backBtn.addEventListener("click", ()=>{
           if(!selected.some(r=>r.id===p.id)) selected.push({id:p.id});
           if(label==="Equipo A") teamA = teamA.filter(r=>r.id!==p.id);
           else teamB = teamB.filter(r=>r.id!==p.id);
@@ -780,7 +1004,7 @@
           saveLocalState(); render();
         });
 
-        item.querySelector('[data-act="remove"]').addEventListener("click", ()=>{
+        rmBtn.addEventListener("click", ()=>{
           selected = selected.filter(r=>r.id!==p.id);
           if(label==="Equipo A") teamA = teamA.filter(r=>r.id!==p.id);
           else teamB = teamB.filter(r=>r.id!==p.id);
@@ -802,11 +1026,15 @@
   function render(){
     renderPills();
     renderSelectionHeader();
+    renderDB();
     renderPool();
     renderTeams();
-    renderDB();
+    renderSidebarBadges();
   }
 
+  // =====================
+  // Actions
+  // =====================
   function moveSelectedToTeam(id, team){
     if(!selected.some(r=>r.id===id)) return setStatus(poolStatus, "Ese jugador no está en el pool.", "error");
     if(team==="A" && teamA.length>=teamSize()) return setStatus(teamAStatus, `A ya tiene ${teamSize()}.`, "error");
@@ -831,7 +1059,7 @@
   function validateSelectedOrThrow(){
     const total = selected.length + teamA.length + teamB.length;
     if(total !== totalPlayers()){
-      throw new Error(`Debes tener exactamente ${totalPlayers()} jugadores seleccionados (Pool + A + B).`);
+      throw new Error(`Debes tener exactamente ${totalPlayers()} jugadores (Pool + A + B).`);
     }
     const need = totalPerSide();
     const d = countSide(selected,"D") + countSide(teamA,"D") + countSide(teamB,"D");
@@ -874,7 +1102,6 @@
     }
     if(needPerTeamSide < 1) throw new Error("Cantidad inválida para autoarmar.");
 
-    // Equipos temporales con sumas
     const A=[], B=[];
     let sumA=0, sumB=0;
     let aD=0,aR=0,bD=0,bR=0;
@@ -898,21 +1125,19 @@
       }
     }
 
-    // 1) Seed: top 2 de cada lado repartidos
-    // (si needPerTeamSide==1, igual funciona porque solo necesita 1D y 1R por equipo)
+    // Seed top 2 de cada lado repartidos
     add("A", Ds[0]); add("B", Ds[1]);
     add("A", Rs[0]); add("B", Rs[1]);
 
     const restD = Ds.slice(2);
     const restR = Rs.slice(2);
 
-    // 2) Greedy: poner siguiente más fuerte donde minimice diferencia de sumas
     function greedyFill(list){
       for(const p of list){
         const okA = canAdd("A", p);
         const okB = canAdd("B", p);
 
-        if(!okA && !okB) throw new Error("No hay cupo en A/B para asignar (revisa selección).");
+        if(!okA && !okB) throw new Error("No hay cupo en A/B (revisa selección).");
         if(okA && !okB) { add("A", p); continue; }
         if(!okA && okB) { add("B", p); continue; }
 
@@ -927,7 +1152,6 @@
     greedyFill(restD);
     greedyFill(restR);
 
-    // 3) Swaps locales (D<->D y R<->R) para bajar aún más Δ
     function improveSwaps(side){
       let improved = true;
       let loops = 0;
@@ -959,7 +1183,6 @@
     improveSwaps("D");
     improveSwaps("R");
 
-    // Pasar a estado app
     teamA = A.map(p=>({id:p.id}));
     teamB = B.map(p=>({id:p.id}));
     selected = [];
@@ -973,7 +1196,7 @@
     const avgB = Math.round((sumB / B.length) * 100) / 100;
     const diff = Math.round(Math.abs(avgA - avgB) * 100) / 100;
 
-    setStatus(status, `✅ Autoarmado mejorado: prom A=${avgA} • prom B=${avgB} • Δ=${diff}`, diff<=0.2 ? "ok" : (diff<=0.5 ? "warn" : "error"));
+    setStatus(status, `✅ Autoarmado: prom A=${avgA} • prom B=${avgB} • Δ=${diff}`, diff<=0.2 ? "ok" : (diff<=0.5 ? "warn" : "error"));
   }
 
   // =====================
@@ -986,7 +1209,6 @@
     }
     return arr;
   }
-
   function pairKey(a,b){ return [a.id,b.id].sort().join("||"); }
   function formatPlayer(p){ return `${normalizeName(p.name)}(${p.side})-${p.rating}`; }
   function formatPair(pair){ return `${formatPlayer(pair[0])} + ${formatPlayer(pair[1])}`; }
@@ -1137,7 +1359,6 @@
     a.remove();
     URL.revokeObjectURL(url);
   }
-
   function exportPDF(){ window.print(); }
 
   // =====================
@@ -1163,14 +1384,6 @@
     saveLocalState();
     render();
     setStatus(dbStatus, "Selección limpia.", "ok");
-  });
-
-  autoTeamsBtn.addEventListener("click", ()=>{
-    try{
-      autoBuildTeamsBalancedFromSelected();
-    }catch(e){
-      setStatus(status, e.message || String(e), "error");
-    }
   });
 
   dbAdd.addEventListener("click", async ()=>{
@@ -1200,9 +1413,7 @@
   dbSort.addEventListener("change", ()=>renderDB());
 
   teamAClear.addEventListener("click", ()=>{
-    teamA.forEach(r=>{
-      if(!selected.some(x=>x.id===r.id)) selected.push({id:r.id});
-    });
+    teamA.forEach(r=>{ if(!selected.some(x=>x.id===r.id)) selected.push({id:r.id}); });
     teamA=[];
     scores.clear(); clearOutput();
     saveLocalState(); render();
@@ -1210,13 +1421,19 @@
   });
 
   teamBClear.addEventListener("click", ()=>{
-    teamB.forEach(r=>{
-      if(!selected.some(x=>x.id===r.id)) selected.push({id:r.id});
-    });
+    teamB.forEach(r=>{ if(!selected.some(x=>x.id===r.id)) selected.push({id:r.id}); });
     teamB=[];
     scores.clear(); clearOutput();
     saveLocalState(); render();
     setStatus(teamBStatus, "B vacío (devuelto al pool).", "ok");
+  });
+
+  autoTeamsBtn.addEventListener("click", ()=>{
+    try{
+      autoBuildTeamsBalancedFromSelected();
+    }catch(e){
+      setStatus(status, e.message || String(e), "error");
+    }
   });
 
   genBtn.addEventListener("click", ()=>{
@@ -1255,7 +1472,7 @@
     clearOutput();
     saveLocalState();
     render();
-    setStatus(status, "Limpio (base se mantiene en Supabase).", "ok");
+    setStatus(status, "Quedada limpia (base se mantiene).", "ok");
   });
 
   // =====================
@@ -1271,7 +1488,7 @@
     teamB = teamB.filter(r=>ids.has(r.id));
 
     render();
-    setStatus(status, "Listo: selecciona jugadores → autoarmar A/B → genera turnos.", "ok");
+    setStatus(status, "Listo: selecciona jugadores en Base → arma en Quedada.", "ok");
   }
 
   async function checkSession(){
@@ -1284,16 +1501,19 @@
         loginBtn.style.display = "none";
         logoutBtn.style.display = "inline-block";
         appRoot.style.display = "block";
+        loggedOut.style.display = "none";
         await initAfterLogin();
       }else{
         authStatusEl.textContent = "Debes iniciar sesión";
         loginBtn.style.display = "inline-block";
         logoutBtn.style.display = "none";
         appRoot.style.display = "none";
+        loggedOut.style.display = "block";
       }
     }catch(e){
       authStatusEl.textContent = "Error sesión: " + (e?.message || e);
       appRoot.style.display = "none";
+      loggedOut.style.display = "block";
     }
   }
 
