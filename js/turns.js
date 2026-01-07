@@ -1,4 +1,4 @@
-// turns.js — Generar turnos A vs B + marcadores + resultados
+// turns.js — Turnos A vs B + marcador "63" + resultados por turno (1/2/3)
 (function () {
   const KEY_PLAYERS = "op_players_v1";
   const KEY_TOTAL = "op_totalPlayers_v1";
@@ -23,23 +23,20 @@
     return [...ids].map(id => players.find(p => p.id === id)).filter(Boolean);
   }
 
-  function pairKey(dId, rId) {
-    return `${dId}|${rId}`;
+  function pairKey(dId, rId) { return `${dId}|${rId}`; }
+
+  function shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
   }
 
-  // Genera matching D-R sin repetir parejas usadas
-  function buildPairs(Ds, Rs, usedPairs, maxTries = 2000) {
+  function buildPairs(Ds, Rs, usedPairs, maxTries = 3000) {
     const dIds = Ds.map(p => p.id);
     const rIds = Rs.map(p => p.id);
-
-    function shuffle(arr) {
-      const a = arr.slice();
-      for (let i = a.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [a[i], a[j]] = [a[j], a[i]];
-      }
-      return a;
-    }
 
     for (let t = 0; t < maxTries; t++) {
       const dOrder = shuffle(dIds);
@@ -47,10 +44,9 @@
 
       const usedR = new Set();
       const pairs = [];
-
       let ok = true;
+
       for (const dId of dOrder) {
-        // candidatos R que no se usaron en este matching y cuya pareja no esté usada globalmente
         const candidates = rOrder.filter(rId => !usedR.has(rId) && !usedPairs.has(pairKey(dId, rId)));
         if (!candidates.length) { ok = false; break; }
         const rId = candidates[Math.floor(Math.random() * candidates.length)];
@@ -59,7 +55,13 @@
       }
       if (ok) return pairs;
     }
-    return null; // no se pudo sin repetir
+    return null;
+  }
+
+  function namePair(pair, playersAll) {
+    const d = playersAll.find(p => p.id === pair.dId);
+    const r = playersAll.find(p => p.id === pair.rId);
+    return `${(d?.name||"D?")} (D) + ${(r?.name||"R?")} (R)`;
   }
 
   function renderTurns() {
@@ -70,16 +72,12 @@
     const total = getTotalPlayers();
     const courts = total / 4;
 
-    const teamAIds = getTeamA();
-    const teamBIds = getTeamB();
-
-    const A = listFromIds(teamAIds, players);
-    const B = listFromIds(teamBIds, players);
+    const A = listFromIds(getTeamA(), players);
+    const B = listFromIds(getTeamB(), players);
 
     const size = total / 2;
     const perSide = size / 2;
 
-    // Validaciones básicas
     const err = [];
     if (A.length !== size || B.length !== size) {
       err.push(`Equipos incompletos: A=${A.length}/${size}, B=${B.length}/${size}.`);
@@ -94,13 +92,10 @@
 
     mount.innerHTML = `
       <div class="card" style="margin-top:10px;">
-        <div class="hint muted">
-          Turnos: cada cancha tiene 2 parejas (A vs B). En cada pareja: 1D + 1R.
-        </div>
-
+        <div class="hint muted">Cada cancha: 1 pareja A vs 1 pareja B. Cada pareja: 1D + 1R.</div>
         ${err.length ? `<div class="hint error" style="margin-top:10px;">${err.join("<br/>")}</div>` : ""}
 
-        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-top:10px; align-items:end;">
+        <div style="display:grid; grid-template-columns: 1fr 1fr auto; gap:10px; margin-top:10px; align-items:end;">
           <div>
             <label>Cantidad de turnos</label>
             <select id="turnsCount">
@@ -115,8 +110,8 @@
             </select>
           </div>
           <div class="btns">
-            <button class="primary" id="genTurns" ${err.length ? "disabled":""}>Generar turnos</button>
-            <button class="ghost" id="regenTurns" disabled>Re-randomizar</button>
+            <button class="primary" id="genTurns" ${err.length ? "disabled":""}>Generar</button>
+            <button class="ghost" id="regenTurns" disabled>Re-random</button>
           </div>
         </div>
 
@@ -136,29 +131,91 @@
     const status = $("turnsStatus");
     const btnRegen = $("regenTurns");
 
-    let lastState = null; // guardamos turnos + scores
+    let lastState = null;
 
     function setStatus(msg, kind) {
       status.textContent = msg;
       status.className = "hint " + (kind || "");
     }
 
+    function renderResults() {
+      if (!lastState) { resultsOut.innerHTML = ""; return; }
+
+      let totalA = 0, totalB = 0;
+      const rows = [];
+
+      lastState.turns.forEach((turn, ti) => {
+        const weight = ti + 1;
+        let turnA = 0, turnB = 0;
+
+        turn.matches.forEach((m, mi) => {
+          const key = `${ti}-${mi}`;
+          const raw = lastState.scores[key] || "";
+          if (raw.length !== 2) return;
+
+          const a = Number(raw[0]);
+          const b = Number(raw[1]);
+          if (a === b) return;
+
+          const winA = a > b;
+          if (winA) { turnA += weight; totalA += weight; }
+          else { turnB += weight; totalB += weight; }
+
+          rows.push({ turno: ti+1, cancha: mi+1, marcador: `${a}-${b}`, ganador: winA ? "Equipo A" : "Equipo B", puntos: weight });
+        });
+
+        rows.push({ turno: ti+1, cancha: "—", marcador: "—", ganador: `Subtotal Turno ${ti+1}`, puntos: `A: ${turnA} • B: ${turnB}` });
+      });
+
+      const winner = totalA === totalB ? "Empate" : (totalA > totalB ? "Gana Equipo A" : "Gana Equipo B");
+
+      resultsOut.innerHTML = `
+        <div class="pill" style="margin-bottom:10px;">
+          Total A: <b>${totalA}</b> • Total B: <b>${totalB}</b> • <b>${winner}</b>
+        </div>
+
+        <div style="overflow:auto;">
+          <table style="width:100%; border-collapse:collapse;">
+            <thead>
+              <tr>
+                <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">Turno</th>
+                <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">Cancha</th>
+                <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">Marcador</th>
+                <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">Ganador</th>
+                <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">Puntos</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => `
+                <tr>
+                  <td style="padding:8px; border-bottom:1px solid rgba(255,255,255,.08);">${r.turno}</td>
+                  <td style="padding:8px; border-bottom:1px solid rgba(255,255,255,.08);">${r.cancha}</td>
+                  <td style="padding:8px; border-bottom:1px solid rgba(255,255,255,.08);">${r.marcador}</td>
+                  <td style="padding:8px; border-bottom:1px solid rgba(255,255,255,.08);">${r.ganador}</td>
+                  <td style="padding:8px; border-bottom:1px solid rgba(255,255,255,.08);">${r.puntos}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
     function renderAll() {
       if (!lastState) return;
 
-      // Render turnos
-      turnsOut.innerHTML = lastState.turns.map((turn, idx) => {
-        const tNo = idx + 1;
+      turnsOut.innerHTML = lastState.turns.map((turn, ti) => {
+        const weight = ti + 1;
         return `
           <div class="card">
-            <h3 style="margin:0 0 10px;">Turno ${tNo} (valor: ${tNo} punto${tNo>1?"s":""} por victoria)</h3>
+            <h3 style="margin:0 0 10px;">Turno ${ti+1} (victoria vale ${weight})</h3>
             <div style="display:grid; gap:10px;">
               ${turn.matches.map((m, mi) => {
-                const key = `${idx}-${mi}`;
-                const raw = lastState.scores[key] || ""; // "63"
+                const key = `${ti}-${mi}`;
+                const raw = lastState.scores[key] || "";
                 const a = raw[0] ?? "";
                 const b = raw[1] ?? "";
-                const display = (raw.length===2) ? `${a}-${b}` : "";
+                const display = raw.length === 2 ? `${a}-${b}` : "";
                 const winner = (raw.length===2 && a!==b) ? (a>b ? "Ganador: Equipo A" : "Ganador: Equipo B") : "";
 
                 return `
@@ -193,12 +250,10 @@
         `;
       }).join("");
 
-      // Bind inputs de marcador
       turnsOut.querySelectorAll("input[data-score]").forEach(inp => {
         inp.addEventListener("input", () => {
-          // solo dígitos 0-7, máximo 2
           let v = (inp.value || "").replace(/\D/g, "");
-          v = v.split("").filter(ch => ch >= "0" && ch <= "7").join("").slice(0,2);
+          v = v.split("").filter(ch => ch >= "0" && ch <= "7").join("").slice(0, 2);
           inp.value = v;
           lastState.scores[inp.dataset.score] = v;
           renderResults();
@@ -206,97 +261,6 @@
       });
 
       renderResults();
-    }
-
-    function namePair(pair, playersAll) {
-      const d = playersAll.find(p => p.id === pair.dId);
-      const r = playersAll.find(p => p.id === pair.rId);
-      const dn = d ? d.name : "D?";
-      const rn = r ? r.name : "R?";
-      return `${dn} (D) + ${rn} (R)`;
-    }
-
-    function renderResults() {
-      if (!lastState) return;
-
-      const turns = lastState.turns;
-      const scores = lastState.scores;
-
-      let totalA = 0;
-      let totalB = 0;
-
-      const rows = [];
-
-      turns.forEach((turn, ti) => {
-        const weight = ti + 1; // Turno 1=1, Turno 2=2, Turno 3=3...
-        let turnA = 0;
-        let turnB = 0;
-
-        turn.matches.forEach((m, mi) => {
-          const key = `${ti}-${mi}`;
-          const raw = scores[key] || "";
-          if (raw.length !== 2) return;
-
-          const a = Number(raw[0]);
-          const b = Number(raw[1]);
-          if (a === b) return;
-
-          const winA = a > b;
-          if (winA) { turnA += weight; totalA += weight; }
-          else { turnB += weight; totalB += weight; }
-
-          rows.push({
-            turno: ti+1,
-            cancha: mi+1,
-            marcador: `${a}-${b}`,
-            ganador: winA ? "Equipo A" : "Equipo B",
-            puntos: weight
-          });
-        });
-
-        // fila resumen por turno
-        rows.push({
-          turno: ti+1,
-          cancha: "—",
-          marcador: "—",
-          ganador: `Subtotal Turno ${ti+1}`,
-          puntos: `A: ${turnA} • B: ${turnB}`
-        });
-      });
-
-      const winner =
-        totalA === totalB ? "Empate" : (totalA > totalB ? "Gana Equipo A" : "Gana Equipo B");
-
-      resultsOut.innerHTML = `
-        <div class="pill" style="margin-bottom:10px;">
-          Total A: <b>${totalA}</b> • Total B: <b>${totalB}</b> • <b>${winner}</b>
-        </div>
-
-        <div style="overflow:auto;">
-          <table style="width:100%; border-collapse:collapse;">
-            <thead>
-              <tr>
-                <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">Turno</th>
-                <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">Cancha</th>
-                <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">Marcador</th>
-                <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">Ganador</th>
-                <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">Puntos</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map(r => `
-                <tr>
-                  <td style="padding:8px; border-bottom:1px solid rgba(255,255,255,.08);">${r.turno}</td>
-                  <td style="padding:8px; border-bottom:1px solid rgba(255,255,255,.08);">${r.cancha}</td>
-                  <td style="padding:8px; border-bottom:1px solid rgba(255,255,255,.08);">${r.marcador}</td>
-                  <td style="padding:8px; border-bottom:1px solid rgba(255,255,255,.08);">${r.ganador}</td>
-                  <td style="padding:8px; border-bottom:1px solid rgba(255,255,255,.08);">${r.puntos}</td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table>
-        </div>
-      `;
     }
 
     function generate(turnCount, avoidRepeats) {
@@ -314,36 +278,23 @@
       const turns = [];
 
       for (let t = 0; t < turnCount; t++) {
-        const pairsA = buildPairs(AD, AR, avoidRepeats ? usedA : new Set(), 3000);
-        const pairsB = buildPairs(BD, BR, avoidRepeats ? usedB : new Set(), 3000);
+        const pairsA = buildPairs(AD, AR, avoidRepeats ? usedA : new Set(), 4000);
+        const pairsB = buildPairs(BD, BR, avoidRepeats ? usedB : new Set(), 4000);
 
         if (!pairsA || !pairsB) {
           return { ok:false, msg:`No pude generar Turno ${t+1} sin repetir parejas. Prueba desactivar “Evitar repetir parejas” o reduce turnos.` };
         }
 
-        // registrar usados
         if (avoidRepeats) {
           for (const p of pairsA) usedA.add(pairKey(p.dId, p.rId));
           for (const p of pairsB) usedB.add(pairKey(p.dId, p.rId));
         }
 
-        // mezclar para asignar a canchas
-        const shuffle = (arr) => {
-          const a = arr.slice();
-          for (let i = a.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [a[i], a[j]] = [a[j], a[i]];
-          }
-          return a;
-        };
-
         const aSh = shuffle(pairsA);
         const bSh = shuffle(pairsB);
 
         const matches = [];
-        for (let c = 0; c < courts; c++) {
-          matches.push({ A: aSh[c], B: bSh[c] });
-        }
+        for (let c = 0; c < courts; c++) matches.push({ A: aSh[c], B: bSh[c] });
 
         turns.push({ matches });
       }
@@ -371,12 +322,13 @@
     });
 
     $("regenTurns").addEventListener("click", () => {
-      if (!$("genTurns")) return;
       $("genTurns").click();
     });
   }
 
-  // refresco al entrar a Turnos
+  // refresco al entrar a Turnos y cuando cambie el pool
+  window.addEventListener("op:poolChanged", () => renderTurns());
+
   window.OP = window.OP || {};
   const prevRefresh = window.OP.refresh;
   window.OP.refresh = (view) => {
