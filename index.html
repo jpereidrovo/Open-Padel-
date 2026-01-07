@@ -5,21 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Open Padel</title>
 
-  <!-- Supabase JS (v2) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
     :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
     body { margin: 0; background: #0b1020; color: #eef2ff; }
     a { color: inherit; }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
-    /* Layout */
-    .appShell {
-      display: grid;
-      grid-template-columns: 270px 1fr;
-      min-height: 100vh;
-    }
+    .appShell { display: grid; grid-template-columns: 270px 1fr; min-height: 100vh; }
     .sidebar {
       background: rgba(255,255,255,.05);
       border-right: 1px solid rgba(255,255,255,.12);
@@ -29,12 +22,8 @@
       height: 100vh;
       box-sizing: border-box;
     }
-    .main {
-      padding: 16px;
-      box-sizing: border-box;
-    }
+    .main { padding: 16px; box-sizing: border-box; }
 
-    /* Sidebar */
     .brand { display:flex; gap:10px; align-items:center; margin-bottom: 14px; }
     .logo {
       width: 38px; height: 38px; border-radius: 12px;
@@ -47,11 +36,7 @@
     .brandTitle b { display:block; }
     .brandTitle span { font-size: 12px; opacity: .75; }
 
-    .nav {
-      display: grid;
-      gap: 8px;
-      margin: 14px 0 18px;
-    }
+    .nav { display: grid; gap: 8px; margin: 14px 0 18px; }
     .navBtn {
       width: 100%;
       padding: 10px 12px;
@@ -67,10 +52,7 @@
       gap:10px;
       font-weight: 750;
     }
-    .navBtn.active {
-      background: rgba(79,70,229,.28);
-      border-color: rgba(255,255,255,.22);
-    }
+    .navBtn.active { background: rgba(79,70,229,.28); border-color: rgba(255,255,255,.22); }
     .navBtn .tag {
       font-size: 12px;
       opacity:.85;
@@ -90,7 +72,6 @@
       gap:10px;
     }
 
-    /* Controls */
     .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .row3 { display:grid; grid-template-columns: 1.2fr .8fr .8fr; gap: 10px; }
     .btns { display:flex; gap: 10px; flex-wrap: wrap; }
@@ -129,7 +110,6 @@
       padding: 14px;
     }
 
-    /* Lists */
     .table { display:grid; gap:8px; }
     .dbRow {
       display:grid;
@@ -157,12 +137,12 @@
       font-size: 12px;
       opacity: .95;
       font-weight: 850;
+      line-height: 1;
     }
 
     .split { display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; }
     .sectionTitle { margin: 0 0 10px; font-size: 16px; }
 
-    /* Quedada layout */
     .quedadaGrid {
       display:grid;
       grid-template-columns: 1fr 1fr 1fr;
@@ -181,7 +161,6 @@
       background: rgba(0,0,0,.18);
     }
 
-    /* Turns */
     .list { display:grid; gap:10px; }
     .turn { border: 1px solid rgba(255,255,255,.14); border-radius: 14px; overflow:hidden; }
     .turn h3 {
@@ -201,27 +180,29 @@
     .scoreRow { display:grid; grid-template-columns: 1fr 190px; gap:10px; align-items:center; }
     .mini { font-size: 12px; opacity:.85; }
 
-    /* Responsive */
+    /* Turn pair styling */
+    .pairText { font-weight: 850; letter-spacing: .1px; }
+    .pairText .badge { margin-left: 6px; }
+    .pairSep { opacity:.85; font-weight: 900; }
+
     @media (max-width: 1100px){
       .appShell { grid-template-columns: 1fr; }
       .sidebar { position: relative; height: auto; }
       .quedadaGrid { grid-template-columns: 1fr; }
     }
 
-    /* Print (PDF) */
     @media print {
       body { background: white; color: black; }
       .sidebar, .noPrint { display:none !important; }
       .card { border: 1px solid #ddd; background: white; }
       .turn, .court { border: 1px solid #ddd; background: white; }
-      code { color: black; }
+      .badge { border: 1px solid #aaa; }
     }
   </style>
 </head>
 
 <body>
 <div class="appShell">
-  <!-- SIDEBAR -->
   <aside class="sidebar noPrint">
     <div class="brand">
       <div class="logo">OP</div>
@@ -260,15 +241,13 @@
     </div>
   </aside>
 
-  <!-- MAIN -->
   <main class="main">
     <div id="appRoot" style="display:none;">
-      <!-- BASE VIEW -->
       <section id="viewBase">
         <div class="card">
           <div class="split">
             <h2 class="sectionTitle">Base de jugadores</h2>
-            <div class="pill" id="selPill">
+            <div class="pill">
               <span id="selCountText">0/16</span>
               <span class="muted" id="selSideText">D:0 R:0</span>
             </div>
@@ -362,7 +341,6 @@
         </div>
       </section>
 
-      <!-- QUEDADA VIEW -->
       <section id="viewQuedada" style="display:none;">
         <div class="card">
           <div class="split">
@@ -469,9 +447,6 @@
 
 <script>
 (() => {
-  // =====================
-  // Supabase config
-  // =====================
   const SUPABASE_URL = "https://tuquyruyyizzccxrvafc.supabase.co";
   const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1cXV5cnV5eWl6emNjeHJ2YWZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MTY5NjgsImV4cCI6MjA4MzI5Mjk2OH0.mTsLI_LQC9ccI7Yoc8UL7coGqQlab8NTp3ItFnX7nnE";
 
@@ -512,21 +487,16 @@
     location.reload();
   });
 
-  // =====================
-  // App state
-  // =====================
-  const STORE_STATE = "open_padel_state_sidebar_v1";
-  const STORE_SCORES = "open_padel_scores_sidebar_v1";
+  const STORE_STATE = "open_padel_state_sidebar_v3";
+  const STORE_SCORES = "open_padel_scores_sidebar_v3";
   const TURNS = 3;
 
   const $ = (id)=>document.getElementById(id);
 
-  // Base UI refs
   const totalPlayersEl = $("totalPlayers");
   const selCountText = $("selCountText");
   const selSideText = $("selSideText");
   const selNeedText = $("selNeedText");
-  const selPill = $("selPill");
 
   const dbName = $("dbName");
   const dbSide = $("dbSide");
@@ -539,7 +509,6 @@
   const dbStatus = $("dbStatus");
   const clearSelectionBtn = $("clearSelection");
 
-  // Quedada UI refs
   const poolInfo = $("poolInfo");
   const status = $("status");
   const poolList = $("poolList");
@@ -566,16 +535,12 @@
   const pillPlayers = $("pillPlayers");
   const pillCourts = $("pillCourts");
 
-  /** @typedef {{id:string, name:string, side:'D'|'R', rating:number}} PlayerDB */
-  /** @type {PlayerDB[]} */ let db = [];
-  /** @type {{id:string}[]} */ let selected = []; // pool
-  /** @type {{id:string}[]} */ let teamA = [];
-  /** @type {{id:string}[]} */ let teamB = [];
-  /** @type {Map<string,string>} */ let scores = new Map();
+  let db = [];
+  let selected = [];
+  let teamA = [];
+  let teamB = [];
+  let scores = new Map();
 
-  // =====================
-  // Helpers
-  // =====================
   function totalPlayers(){ return Number(totalPlayersEl.value); }
   function teamSize(){ return totalPlayers() / 2; }
   function courts(){ return totalPlayers() / 4; }
@@ -650,9 +615,6 @@
     }
   }
 
-  // =====================
-  // Navigation (sidebar)
-  // =====================
   function setView(view){
     if(view === "quedada"){
       viewBase.style.display = "none";
@@ -677,9 +639,6 @@
   goQuedada.addEventListener("click", ()=>setView("quedada"));
   backBase.addEventListener("click", ()=>setView("base"));
 
-  // =====================
-  // Supabase DB functions
-  // =====================
   async function loadDBFromSupabase() {
     const { data, error } = await sb.from("players").select("*").order("name");
     if (error) throw error;
@@ -696,9 +655,6 @@
     if (error) throw error;
   }
 
-  // =====================
-  // Rendering (Base + Quedada)
-  // =====================
   function renderSidebarBadges(){
     tagBase.textContent = String(db.length);
     tagQuedada.textContent = `${selected.length + teamA.length + teamB.length}/${totalPlayers()}`;
@@ -714,8 +670,6 @@
     const d = countSide(selected,"D");
     const r = countSide(selected,"R");
     const need = totalPerSide();
-    const totalPicked = selected.length + teamA.length + teamB.length;
-
     selCountText.textContent = `${selected.length}/${totalPlayers()}`;
     selSideText.textContent = `D:${d} R:${r}`;
 
@@ -741,7 +695,8 @@
     }
     selNeedText.textContent = msg;
 
-    poolInfo.textContent = `${totalPicked}/${totalPlayers()} • D:${countSide(selected,"D")+countSide(teamA,"D")+countSide(teamB,"D")} R:${countSide(selected,"R")+countSide(teamA,"R")+countSide(teamB,"R")} • prom pool:${avgRating(selected)}`;
+    const totalPicked = selected.length + teamA.length + teamB.length;
+    poolInfo.textContent = `${totalPicked}/${totalPlayers()} • D:${countSide(selected,"D")+countSide(teamA,"D")+countSide(teamB,"D")} R:${countSide(selected,"R")+countSide(teamA,"R")+countSide(teamB,"R")}`;
   }
 
   function renderDB(){
@@ -764,7 +719,6 @@
       const isSel = selected.some(r=>r.id===p.id);
       const isInTeams = teamA.some(r=>r.id===p.id) || teamB.some(r=>r.id===p.id);
 
-      // Checkbox rules: cannot exceed total N or exceed D/R requirement (pool only)
       const dNow = countSide(selected,"D");
       const rNow = countSide(selected,"R");
       const wouldBeD = p.side==="D" ? dNow + (isSel?0:1) : dNow;
@@ -799,7 +753,6 @@
       dbList.appendChild(row);
     }
 
-    // Checkbox select/deselect (pool)
     dbList.querySelectorAll("input.pickCb").forEach(cb=>{
       cb.addEventListener("change", ()=>{
         const id = cb.getAttribute("data-id");
@@ -842,7 +795,6 @@
       });
     });
 
-    // Edit name (on blur)
     dbList.querySelectorAll("input.nameInp").forEach(inp=>{
       const apply = async ()=>{
         const id = inp.getAttribute("data-id");
@@ -880,7 +832,6 @@
       });
     });
 
-    // Edit side inline (block if breaks pool mix)
     dbList.querySelectorAll("select.sideSel").forEach(sel=>{
       sel.addEventListener("change", async ()=>{
         const id = sel.getAttribute("data-id");
@@ -920,7 +871,6 @@
       });
     });
 
-    // Edit rating inline
     dbList.querySelectorAll("input.ratingInp").forEach(inp=>{
       inp.addEventListener("change", async ()=>{
         const id = inp.getAttribute("data-id");
@@ -942,7 +892,6 @@
       });
     });
 
-    // Move to A/B
     dbList.querySelectorAll("button").forEach(btn=>{
       btn.addEventListener("click", ()=>{
         const act = btn.getAttribute("data-act");
@@ -1032,9 +981,6 @@
     renderSidebarBadges();
   }
 
-  // =====================
-  // Actions
-  // =====================
   function moveSelectedToTeam(id, team){
     if(!selected.some(r=>r.id===id)) return setStatus(poolStatus, "Ese jugador no está en el pool.", "error");
     if(team==="A" && teamA.length>=teamSize()) return setStatus(teamAStatus, `A ya tiene ${teamSize()}.`, "error");
@@ -1078,9 +1024,22 @@
       throw new Error(`Equipo B debe tener ${perTeamSide()}D y ${perTeamSide()}R.`);
   }
 
-  // ==========================================================
-  // AUTOARMADO MEJORADO (SEED TOP + GREEDY + SWAPS)
-  // ==========================================================
+  // ===== Turn formatting with badges (no rating) =====
+  function playerHtml(p){
+    return `<span class="pName">${escapeHtml(normalizeName(p.name))}</span> <span class="badge">${escapeHtml(p.side)}</span>`;
+  }
+  function pairHtml(pair){
+    return `${playerHtml(pair[0])} <span class="pairSep">+</span> ${playerHtml(pair[1])}`;
+  }
+  function pairText(pair){
+   sfs
+    // Plain text for CSV/copy (no badges)
+    const a = `${normalizeName(pair[0].name)} (${pair[0].side})`;
+    const b = `${normalizeName(pair[1].name)} (${pair[1].side})`;
+    return `${a} + ${b}`;
+  }
+
+  // ===== Autoarmado mejorado =====
   function autoBuildTeamsBalancedFromSelected(){
     const allIds = new Set([
       ...selected.map(r=>r.id),
@@ -1125,7 +1084,6 @@
       }
     }
 
-    // Seed top 2 de cada lado repartidos
     add("A", Ds[0]); add("B", Ds[1]);
     add("A", Rs[0]); add("B", Rs[1]);
 
@@ -1199,9 +1157,6 @@
     setStatus(status, `✅ Autoarmado: prom A=${avgA} • prom B=${avgB} • Δ=${diff}`, diff<=0.2 ? "ok" : (diff<=0.5 ? "warn" : "error"));
   }
 
-  // =====================
-  // Turnos generation
-  // =====================
   function shuffle(arr){
     for(let i=arr.length-1;i>0;i--){
       const j = Math.floor(Math.random()*(i+1));
@@ -1210,8 +1165,6 @@
     return arr;
   }
   function pairKey(a,b){ return [a.id,b.id].sort().join("||"); }
-  function formatPlayer(p){ return `${normalizeName(p.name)}(${p.side})-${p.rating}`; }
-  function formatPair(pair){ return `${formatPlayer(pair[0])} + ${formatPlayer(pair[1])}`; }
   function matchId(turn, court){ return `T${turn}-C${court}`; }
 
   function buildPairs(teamRefs, usedPairs){
@@ -1259,8 +1212,15 @@
       div.className = "court";
       div.innerHTML = `
         <div class="muted"><b>Cancha ${courtNum}</b></div>
-        <div>Equipo A: <code>${escapeHtml(formatPair(m.a))}</code></div>
-        <div>Equipo B: <code>${escapeHtml(formatPair(m.b))}</code></div>
+
+        <div class="pairText" data-plain="${escapeHtmlAttr(pairText(m.a))}">
+          <b>Equipo A:</b> ${pairHtml(m.a)}
+        </div>
+
+        <div class="pairText" data-plain="${escapeHtmlAttr(pairText(m.b))}">
+          <b>Equipo B:</b> ${pairHtml(m.b)}
+        </div>
+
         <div class="scoreRow">
           <div class="mini muted">Marcador (ej: 6-4 3-6 10-8)</div>
           <input data-score-id="${id}" placeholder="Marcador..." value="${escapeHtmlAttr(existing)}" />
@@ -1324,7 +1284,6 @@
     }
   }
 
-  // Export
   function exportCSV(){
     const rows=[];
     rows.push(["Turno","Cancha","Pareja A","Pareja B","Marcador"].join(","));
@@ -1339,9 +1298,9 @@
         if(turnDiv){
           const courtDiv = [...turnDiv.querySelectorAll(".court")].find(x => x.querySelector("b")?.innerText === `Cancha ${c}`);
           if(courtDiv){
-            const codes = courtDiv.querySelectorAll("code");
-            pairA = (codes[0]?.innerText || "").replaceAll('"','""');
-            pairB = (codes[1]?.innerText || "").replaceAll('"','""');
+            const pairLines = courtDiv.querySelectorAll(".pairText");
+            pairA = (pairLines[0]?.getAttribute("data-plain") || "").replaceAll('"','""');
+            pairB = (pairLines[1]?.getAttribute("data-plain") || "").replaceAll('"','""');
           }
         }
         rows.push([t,c,`"${pairA}"`,`"${pairB}"`,`"${score}"`].join(","));
@@ -1361,9 +1320,7 @@
   }
   function exportPDF(){ window.print(); }
 
-  // =====================
-  // Events
-  // =====================
+  // ===== Events (resto igual) =====
   totalPlayersEl.addEventListener("change", ()=>{
     selected = [];
     teamA = [];
@@ -1475,9 +1432,6 @@
     setStatus(status, "Quedada limpia (base se mantiene).", "ok");
   });
 
-  // =====================
-  // Auth + init
-  // =====================
   async function initAfterLogin(){
     loadLocalState();
     await loadDBFromSupabase();
