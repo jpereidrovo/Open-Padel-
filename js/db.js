@@ -1,14 +1,11 @@
 // db.js — Base de jugadores (local) + Pool con N automático (múltiplos de 4)
-// FIXES:
-// - N se recalcula automáticamente según selección del pool.
-// - Cada cambio en pool “notifica” a Equipos (KEY_POOL_VER).
-// - Al deseleccionar, se actualiza pool inmediatamente.
+// FIX: al cambiar pool dispara evento op:poolChanged (misma pestaña)
 
 (function () {
   const KEY_PLAYERS = "op_players_v1";
   const KEY_POOL = "op_pool_v1";
-  const KEY_TOTAL = "op_totalPlayers_v1"; // lo usan Equipos/Turnos
-  const KEY_POOL_VER = "op_pool_ver_v1";  // “ping” para refrescar vistas
+  const KEY_TOTAL = "op_totalPlayers_v1";
+  const KEY_POOL_VER = "op_pool_ver_v1";
 
   const $ = (id) => document.getElementById(id);
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
@@ -40,17 +37,19 @@
   }
 
   function deriveNFromPoolCount(poolCount) {
-    // N es el múltiplo de 4 más cercano hacia abajo (mínimo 4, máximo 24)
-    if (poolCount <= 0) return getTotalPlayers(); // si no hay pool, no cambiamos N
+    // múltiplo de 4 hacia abajo (mínimo 4)
+    if (poolCount <= 0) return getTotalPlayers();
     const n = Math.max(4, Math.floor(poolCount / 4) * 4);
     return ALLOWED_TOTALS.includes(n) ? n : 24;
   }
 
   function notifyPoolChanged() {
     try { localStorage.setItem(KEY_POOL_VER, String(Date.now())); } catch {}
+    // ✅ evento para la MISMA pestaña
+    try { window.dispatchEvent(new CustomEvent("op:poolChanged")); } catch {}
   }
 
-  function perSide(n) { return n / 2; } // pool: D=n/2, R=n/2
+  function perSide(n) { return n / 2; }
   function escapeHtml(s) {
     return String(s ?? "")
       .replaceAll("&", "&amp;")
@@ -59,11 +58,9 @@
       .replaceAll('"', "&quot;");
   }
 
-  // Estado local
   let players = loadJSON(KEY_PLAYERS, []);
   let poolIds = new Set(loadJSON(KEY_POOL, []));
 
-  // Base demo inicial
   if (!Array.isArray(players) || players.length === 0) {
     players = [
       { id: uid(), name: "Juan", side: "D", rating: 7 },
@@ -79,10 +76,7 @@
   function ensurePoolValidity() {
     const validIds = new Set(players.map(p => p.id));
     poolIds = new Set([...poolIds].filter(id => validIds.has(id)));
-
-    // recorta a 24 máximo
     if (poolIds.size > 24) poolIds = new Set([...poolIds].slice(0, 24));
-
     saveJSON(KEY_POOL, [...poolIds]);
   }
 
@@ -116,14 +110,10 @@
   }
 
   function persistPoolAndAutoN() {
-    // guarda pool
     saveJSON(KEY_POOL, [...poolIds]);
 
-    // recalcula N automáticamente a partir del tamaño del pool
     const newN = deriveNFromPoolCount(poolIds.size);
-    if (newN !== getTotalPlayers()) {
-      setTotalPlayers(newN);
-    }
+    if (newN !== getTotalPlayers()) setTotalPlayers(newN);
 
     notifyPoolChanged();
     updateBadges();
@@ -135,7 +125,6 @@
 
     ensurePoolValidity();
 
-    // N actual (auto)
     const n = getTotalPlayers();
     const needSide = perSide(n);
     const { d, r } = countPoolSides();
@@ -145,12 +134,8 @@
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
           <div>
             <label>N automático (múltiplos de 4)</label>
-            <div class="pill">
-              N actual: <b>${n}</b> (se ajusta solo según selección)
-            </div>
-            <div class="hint muted" style="margin-top:6px;">
-              Reglas pool: D=<b>${needSide}</b> y R=<b>${needSide}</b>
-            </div>
+            <div class="pill">N actual: <b>${n}</b> (se ajusta solo según selección)</div>
+            <div class="hint muted" style="margin-top:6px;">Reglas pool: D=<b>${needSide}</b> y R=<b>${needSide}</b></div>
           </div>
           <div>
             <label>Pool seleccionado</label>
@@ -162,10 +147,7 @@
         <div style="height:10px"></div>
 
         <div style="display:grid; grid-template-columns: 1.2fr .8fr .8fr auto; gap:10px; align-items:end;">
-          <div>
-            <label>Nombre</label>
-            <input id="opName" placeholder="Ej: Santi" />
-          </div>
+          <div><label>Nombre</label><input id="opName" placeholder="Ej: Santi" /></div>
           <div>
             <label>Lado</label>
             <select id="opSide">
@@ -173,13 +155,8 @@
               <option value="R">Revés (R)</option>
             </select>
           </div>
-          <div>
-            <label>Nivel (1–10)</label>
-            <input id="opRating" type="number" min="1" max="10" value="5" />
-          </div>
-          <div>
-            <button class="primary" id="opAdd">Agregar</button>
-          </div>
+          <div><label>Nivel (1–10)</label><input id="opRating" type="number" min="1" max="10" value="5" /></div>
+          <div><button class="primary" id="opAdd">Agregar</button></div>
         </div>
 
         <div class="btns" style="margin-top:10px;">
@@ -191,10 +168,7 @@
 
       <div class="card" style="margin-top:14px;">
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-          <div>
-            <label>Buscar</label>
-            <input id="opSearch" placeholder="Filtrar por nombre..." />
-          </div>
+          <div><label>Buscar</label><input id="opSearch" placeholder="Filtrar por nombre..." /></div>
           <div>
             <label>Ordenar</label>
             <select id="opSort">
@@ -207,27 +181,18 @@
         </div>
 
         <div id="opList" style="margin-top:12px; display:grid; gap:8px;"></div>
-        <div class="hint muted" style="margin-top:10px;">
-          Selecciona con checkbox. N se ajusta automáticamente a múltiplos de 4.
-        </div>
+        <div class="hint muted" style="margin-top:10px;">Al marcar/desmarcar, Equipos se actualiza al instante.</div>
       </div>
     `;
 
     const poolHint = $("opPoolHint");
     const status = $("opStatus");
 
-    // Hint del pool según N actual
-    if (poolIds.size < n) {
-      setStatus(poolHint, `Faltan ${n - poolIds.size} jugadores para completar N=${n}.`, "warn");
-    } else if (poolIds.size > n) {
-      setStatus(poolHint, `Hay más que N=${n}. Se usará N automático; ajusta seleccionando/deseleccionando.`, "warn");
-    } else if (d === needSide && r === needSide) {
-      setStatus(poolHint, "✅ Pool completo y balanceado D/R.", "ok");
-    } else {
-      setStatus(poolHint, `❌ Pool completo pero mix incorrecto. D=${d} R=${r}`, "error");
-    }
+    if (poolIds.size < n) setStatus(poolHint, `Faltan ${n - poolIds.size} jugadores para completar N=${n}.`, "warn");
+    else if (poolIds.size === n && d === needSide && r === needSide) setStatus(poolHint, "✅ Pool completo y balanceado D/R.", "ok");
+    else if (poolIds.size === n) setStatus(poolHint, `❌ Pool completo pero mix incorrecto. D=${d} R=${r}`, "error");
+    else setStatus(poolHint, "Selecciona/deselecciona: N se ajusta a múltiplos de 4.", "warn");
 
-    // Agregar jugador
     $("opAdd").addEventListener("click", () => {
       const name = norm($("opName").value);
       const side = $("opSide").value === "R" ? "R" : "D";
@@ -246,7 +211,6 @@
       updateBadges();
     });
 
-    // Limpiar pool
     $("opClearPool").addEventListener("click", () => {
       poolIds.clear();
       persistPoolAndAutoN();
@@ -254,7 +218,6 @@
       renderBase();
     });
 
-    // Lista editable + selección pool
     const listEl = $("opList");
     const searchEl = $("opSearch");
     const sortEl = $("opSort");
@@ -269,7 +232,6 @@
       if (sort === "ratingAsc") items.sort((a,b)=>a.rating-b.rating || norm(a.name).localeCompare(norm(b.name)));
       if (sort === "side") items.sort((a,b)=>a.side.localeCompare(b.side) || norm(a.name).localeCompare(norm(b.name)));
 
-      // límite de selección total (24)
       const disableMore = (poolIds.size >= 24);
 
       listEl.innerHTML = items.map(p => {
@@ -291,7 +253,6 @@
         `;
       }).join("");
 
-      // pick pool
       listEl.querySelectorAll("[data-act='pick']").forEach(cb => {
         cb.addEventListener("change", () => {
           const id = cb.getAttribute("data-id");
@@ -300,11 +261,10 @@
           else poolIds.delete(id);
 
           persistPoolAndAutoN();
-          renderBase(); // para que el hint y N se actualicen al instante
+          renderBase(); // refresca hints + N
         });
       });
 
-      // editar nombre
       listEl.querySelectorAll("[data-act='name']").forEach(inp => {
         inp.addEventListener("blur", () => {
           const id = inp.getAttribute("data-id");
@@ -320,7 +280,6 @@
         });
       });
 
-      // editar lado
       listEl.querySelectorAll("[data-act='side']").forEach(sel => {
         sel.addEventListener("change", () => {
           const id = sel.getAttribute("data-id");
@@ -328,13 +287,11 @@
           if (!p) return;
           p.side = (sel.value === "R") ? "R" : "D";
           saveJSON(KEY_PLAYERS, players);
-          // si está en pool, recalcula hints y notifica
           if (poolIds.has(id)) persistPoolAndAutoN();
           renderBase();
         });
       });
 
-      // editar rating
       listEl.querySelectorAll("[data-act='rating']").forEach(inp => {
         inp.addEventListener("change", () => {
           const id = inp.getAttribute("data-id");
@@ -346,7 +303,6 @@
         });
       });
 
-      // borrar
       listEl.querySelectorAll("[data-act='del']").forEach(btn => {
         btn.addEventListener("click", () => {
           const id = btn.getAttribute("data-id");
@@ -370,6 +326,6 @@
   document.addEventListener("DOMContentLoaded", () => {
     renderBase();
     updateBadges();
-    console.log("✅ db.js listo (auto N + sync)");
+    console.log("✅ db.js listo (evento op:poolChanged)");
   });
 })();
