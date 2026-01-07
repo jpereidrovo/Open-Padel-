@@ -6,13 +6,79 @@
   <title>Open Padel</title>
 
   <link rel="stylesheet" href="./css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 
 <body>
-  <h1>Open Padel – versión modular</h1>
-  <p>Si ves fondo oscuro, el CSS está cargando.</p>
-  <div id="jsStatus" class="card" style="margin:20px;">Cargando JS…</div>
+  <div class="appShell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">OP</div>
+        <div class="brandTitle">
+          <b>Open Padel</b>
+          <span>Base • Equipos • Turnos</span>
+        </div>
+      </div>
 
+      <div class="sidebarCard" id="authCard">
+        <div class="hint" id="authStatus">Listo</div>
+        <div class="btns">
+          <button class="primary small" id="loginBtn">Google</button>
+          <button class="ghost small" id="logoutBtn" style="display:none">Salir</button>
+        </div>
+      </div>
+
+      <div class="nav" style="margin-top: 14px;">
+        <button class="navBtn active" id="navBase">
+          <span>👤 Base</span>
+          <span class="tag" id="tagBase">0</span>
+        </button>
+        <button class="navBtn" id="navTeams">
+          <span>👥 Equipos</span>
+          <span class="tag" id="tagTeams">0/16</span>
+        </button>
+        <button class="navBtn" id="navTurns">
+          <span>🎾 Turnos</span>
+          <span class="tag" id="tagTurns">—</span>
+        </button>
+      </div>
+
+      <div class="sidebarCard">
+        <div class="hint">
+          1) Base: selecciona jugadores<br/>
+          2) Equipos: arma A/B<br/>
+          3) Turnos: cruces + resultados
+        </div>
+        <div class="pill" id="pillInfo">N: <b>16</b> • Canchas: <b>4</b></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div id="appRoot">
+        <section id="viewBase" class="card">
+          <h2 style="margin:0 0 10px;">Base</h2>
+          <div id="baseMount"></div>
+        </section>
+
+        <section id="viewTeams" class="card" style="display:none; margin-top:14px;">
+          <h2 style="margin:0 0 10px;">Equipos</h2>
+          <div id="teamsMount"></div>
+        </section>
+
+        <section id="viewTurns" class="card" style="display:none; margin-top:14px;">
+          <h2 style="margin:0 0 10px;">Turnos</h2>
+          <div id="turnsMount"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- orden de módulos -->
+  <script src="./js/score.js"></script>
+  <script src="./js/results.js"></script>
+  <script src="./js/db.js"></script>
+  <script src="./js/teams.js"></script>
+  <script src="./js/turns.js"></script>
   <script src="./js/app.js"></script>
 </body>
 </html>
