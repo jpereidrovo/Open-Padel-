@@ -1,296 +1,375 @@
-// teams.js — Equipos A/B con Autoarmado balanceado
+// db.js — Base de jugadores (local) + Pool con N automático (múltiplos de 4)
 // FIXES:
-// 1) N se toma desde Base (op_totalPlayers_v1). No hay selector en Equipos.
-// 2) Si un jugador está en el POOL, se quita de A/B (pool “manda”) para que se vea al seleccionar en Base.
-// 3) Al entrar a Equipos se refresca siempre (vía app.js → window.OP.refresh)
+// - N se recalcula automáticamente según selección del pool.
+// - Cada cambio en pool “notifica” a Equipos (KEY_POOL_VER).
+// - Al deseleccionar, se actualiza pool inmediatamente.
 
 (function () {
   const KEY_PLAYERS = "op_players_v1";
   const KEY_POOL = "op_pool_v1";
-  const KEY_TOTAL = "op_totalPlayers_v1";
-  const KEY_TEAM_A = "op_teamA_v1";
-  const KEY_TEAM_B = "op_teamB_v1";
+  const KEY_TOTAL = "op_totalPlayers_v1"; // lo usan Equipos/Turnos
+  const KEY_POOL_VER = "op_pool_ver_v1";  // “ping” para refrescar vistas
+
+  const $ = (id) => document.getElementById(id);
+  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+  const norm = (s) => String(s ?? "").trim().replace(/\s+/g, " ");
+  const uid = () => "p_" + Math.random().toString(16).slice(2) + Date.now().toString(16);
 
   const ALLOWED_TOTALS = [4, 8, 12, 16, 20, 24];
 
-  const $ = (id) => document.getElementById(id);
-  const loadJSON = (k, fb) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fb; } catch { return fb; } };
-  const saveJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
-
-  function getPlayers() { return loadJSON(KEY_PLAYERS, []); }
-  function getPool() { return new Set(loadJSON(KEY_POOL, [])); }
-  function getTeamA() { return new Set(loadJSON(KEY_TEAM_A, [])); }
-  function getTeamB() { return new Set(loadJSON(KEY_TEAM_B, [])); }
-  function setTeamA(s) { saveJSON(KEY_TEAM_A, [...s]); }
-  function setTeamB(s) { saveJSON(KEY_TEAM_B, [...s]); }
-  function setPool(s) { saveJSON(KEY_POOL, [...s]); }
+  function loadJSON(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  function saveJSON(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  }
 
   function getTotalPlayers() {
     const v = Number(localStorage.getItem(KEY_TOTAL) || 16);
     return ALLOWED_TOTALS.includes(v) ? v : 16;
   }
-
-  function teamSize(total) { return total / 2; }
-  function perTeamSide(total) { return teamSize(total) / 2; }
-
-  function listFromIds(ids, players) {
-    return [...ids].map(id => players.find(p => p.id === id)).filter(Boolean);
+  function setTotalPlayers(v) {
+    const n = Number(v);
+    if (!ALLOWED_TOTALS.includes(n)) return;
+    localStorage.setItem(KEY_TOTAL, String(n));
   }
 
-  function countSide(ids, players, side) {
-    return listFromIds(ids, players).filter(p => p.side === side).length;
+  function deriveNFromPoolCount(poolCount) {
+    // N es el múltiplo de 4 más cercano hacia abajo (mínimo 4, máximo 24)
+    if (poolCount <= 0) return getTotalPlayers(); // si no hay pool, no cambiamos N
+    const n = Math.max(4, Math.floor(poolCount / 4) * 4);
+    return ALLOWED_TOTALS.includes(n) ? n : 24;
   }
 
-  function avg(set, playersArr) {
-    const arr = [...set].map(id => playersArr.find(p => p.id === id)).filter(Boolean);
-    if (!arr.length) return 0;
-    return arr.reduce((s,p)=>s+p.rating,0) / arr.length;
+  function notifyPoolChanged() {
+    try { localStorage.setItem(KEY_POOL_VER, String(Date.now())); } catch {}
   }
 
-  function normalizeState(players, pool, A, B) {
-    const total = getTotalPlayers();
-
-    // 1) IDs válidos
-    const valid = new Set(players.map(p => p.id));
-    const clean = (set) => new Set([...set].filter(id => valid.has(id)));
-    pool = clean(pool);
-    A = clean(A);
-    B = clean(B);
-
-    // 2) SI ESTÁ EN POOL -> SE QUITA DE A/B (pool manda)
-    for (const id of pool) {
-      A.delete(id);
-      B.delete(id);
-    }
-
-    // 3) No duplicar A/B
-    for (const id of A) B.delete(id);
-
-    // 4) Pool no puede exceder N
-    if (pool.size > total) pool = new Set([...pool].slice(0, total));
-
-    setPool(pool); setTeamA(A); setTeamB(B);
-    return { pool, A, B };
+  function perSide(n) { return n / 2; } // pool: D=n/2, R=n/2
+  function escapeHtml(s) {
+    return String(s ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
   }
 
-  function autoBuild(players, poolSet) {
-    const total = getTotalPlayers();
-    const size = teamSize(total);
-    const need = perTeamSide(total);
+  // Estado local
+  let players = loadJSON(KEY_PLAYERS, []);
+  let poolIds = new Set(loadJSON(KEY_POOL, []));
 
-    const pool = [...poolSet].map(id => players.find(p => p.id === id)).filter(Boolean);
-    if (pool.length !== total) {
-      return { ok:false, msg:`El pool debe tener exactamente ${total} jugadores (ahora: ${pool.length}).` };
-    }
-
-    const Ds = pool.filter(p=>p.side==="D").sort((a,b)=>b.rating-a.rating);
-    const Rs = pool.filter(p=>p.side==="R").sort((a,b)=>b.rating-a.rating);
-
-    if (Ds.length !== total/2 || Rs.length !== total/2) {
-      return { ok:false, msg:`Pool debe estar balanceado: D=${total/2} y R=${total/2} (ahora D=${Ds.length}, R=${Rs.length}).` };
-    }
-
-    const A = new Set(), B = new Set();
-
-    // Semillas: top 2 D + top 2 R
-    const seeds = [Ds.shift(), Rs.shift(), Ds.shift(), Rs.shift()].filter(Boolean);
-    let sumA = 0, sumB = 0;
-    for (const p of seeds) {
-      if (sumA <= sumB) { A.add(p.id); sumA += p.rating; }
-      else { B.add(p.id); sumB += p.rating; }
-    }
-
-    function countTeamSide(set, side) {
-      let c = 0;
-      for (const id of set) {
-        const p = pool.find(x=>x.id===id);
-        if (p && p.side===side) c++;
-      }
-      return c;
-    }
-    function canAdd(set, p) {
-      if (set.size >= size) return false;
-      if (p.side==="D" && countTeamSide(set,"D") >= need) return false;
-      if (p.side==="R" && countTeamSide(set,"R") >= need) return false;
-      return true;
-    }
-
-    const rest = [...Ds, ...Rs].sort((a,b)=>b.rating-a.rating);
-    for (const p of rest) {
-      const first = avg(A,pool) <= avg(B,pool) ? A : B;
-      const second = first === A ? B : A;
-      if (canAdd(first,p)) first.add(p.id);
-      else if (canAdd(second,p)) second.add(p.id);
-      else return { ok:false, msg:"No se pudo balancear (revisa D/R y N)." };
-    }
-
-    return {
-      ok:true,
-      A, B,
-      msg:`✅ Autoarmado OK • N=${total} • Promedios A=${avg(A,pool).toFixed(2)} B=${avg(B,pool).toFixed(2)}`
-    };
+  // Base demo inicial
+  if (!Array.isArray(players) || players.length === 0) {
+    players = [
+      { id: uid(), name: "Juan", side: "D", rating: 7 },
+      { id: uid(), name: "Pedro", side: "R", rating: 7 },
+      { id: uid(), name: "Luis", side: "D", rating: 6 },
+      { id: uid(), name: "Carlos", side: "R", rating: 6 },
+      { id: uid(), name: "Andrés", side: "D", rating: 5 },
+      { id: uid(), name: "Mateo", side: "R", rating: 5 },
+    ];
+    saveJSON(KEY_PLAYERS, players);
   }
 
-  function render() {
-    const mount = $("teamsMount");
+  function ensurePoolValidity() {
+    const validIds = new Set(players.map(p => p.id));
+    poolIds = new Set([...poolIds].filter(id => validIds.has(id)));
+
+    // recorta a 24 máximo
+    if (poolIds.size > 24) poolIds = new Set([...poolIds].slice(0, 24));
+
+    saveJSON(KEY_POOL, [...poolIds]);
+  }
+
+  function countPoolSides() {
+    let d = 0, r = 0;
+    for (const id of poolIds) {
+      const p = players.find(x => x.id === id);
+      if (!p) continue;
+      if (p.side === "D") d++;
+      if (p.side === "R") r++;
+    }
+    return { d, r };
+  }
+
+  function setStatus(el, msg, kind) {
+    el.textContent = msg;
+    el.className = "hint " + (kind || "");
+  }
+
+  function updateBadges() {
+    const tagBase = $("tagBase");
+    const tagTeams = $("tagTeams");
+    const pillInfo = $("pillInfo");
+
+    const n = getTotalPlayers();
+    const courts = n / 4;
+
+    if (tagBase) tagBase.textContent = String(players.length);
+    if (tagTeams) tagTeams.textContent = `${poolIds.size}/${n}`;
+    if (pillInfo) pillInfo.innerHTML = `N: <b>${n}</b> • Canchas: <b>${courts}</b>`;
+  }
+
+  function persistPoolAndAutoN() {
+    // guarda pool
+    saveJSON(KEY_POOL, [...poolIds]);
+
+    // recalcula N automáticamente a partir del tamaño del pool
+    const newN = deriveNFromPoolCount(poolIds.size);
+    if (newN !== getTotalPlayers()) {
+      setTotalPlayers(newN);
+    }
+
+    notifyPoolChanged();
+    updateBadges();
+  }
+
+  function renderBase() {
+    const mount = $("baseMount");
     if (!mount) return;
 
-    const players = getPlayers();
-    let pool = getPool();
-    let A = getTeamA();
-    let B = getTeamB();
+    ensurePoolValidity();
 
-    ({ pool, A, B } = normalizeState(players, pool, A, B));
-
-    const total = getTotalPlayers();
-    const size = teamSize(total);
-    const need = perTeamSide(total);
-
-    const poolArr = listFromIds(pool, players).sort((a,b)=>a.side.localeCompare(b.side) || b.rating-a.rating || a.name.localeCompare(b.name));
-    const aArr = listFromIds(A, players).sort((a,b)=>a.side.localeCompare(b.side) || b.rating-a.rating || a.name.localeCompare(b.name));
-    const bArr = listFromIds(B, players).sort((a,b)=>a.side.localeCompare(b.side) || b.rating-a.rating || a.name.localeCompare(b.name));
-
-    const aD = countSide(A, players, "D"), aR = countSide(A, players, "R");
-    const bD = countSide(B, players, "D"), bR = countSide(B, players, "R");
+    // N actual (auto)
+    const n = getTotalPlayers();
+    const needSide = perSide(n);
+    const { d, r } = countPoolSides();
 
     mount.innerHTML = `
       <div class="card" style="margin-top:10px;">
-        <div class="hint muted">
-          N actual: <b>${total}</b> (se define en <b>Base</b>) • Pool necesita D=<b>${total/2}</b> y R=<b>${total/2}</b>.
-          Cada equipo: <b>${size}</b> (D=<b>${need}</b>, R=<b>${need}</b>).
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+          <div>
+            <label>N automático (múltiplos de 4)</label>
+            <div class="pill">
+              N actual: <b>${n}</b> (se ajusta solo según selección)
+            </div>
+            <div class="hint muted" style="margin-top:6px;">
+              Reglas pool: D=<b>${needSide}</b> y R=<b>${needSide}</b>
+            </div>
+          </div>
+          <div>
+            <label>Pool seleccionado</label>
+            <div class="pill">Seleccionados: <b>${poolIds.size}</b> • D:<b>${d}</b> R:<b>${r}</b></div>
+            <div id="opPoolHint" class="hint" style="margin-top:6px;"></div>
+          </div>
         </div>
+
+        <div style="height:10px"></div>
+
+        <div style="display:grid; grid-template-columns: 1.2fr .8fr .8fr auto; gap:10px; align-items:end;">
+          <div>
+            <label>Nombre</label>
+            <input id="opName" placeholder="Ej: Santi" />
+          </div>
+          <div>
+            <label>Lado</label>
+            <select id="opSide">
+              <option value="D">Derecha (D)</option>
+              <option value="R">Revés (R)</option>
+            </select>
+          </div>
+          <div>
+            <label>Nivel (1–10)</label>
+            <input id="opRating" type="number" min="1" max="10" value="5" />
+          </div>
+          <div>
+            <button class="primary" id="opAdd">Agregar</button>
+          </div>
+        </div>
+
         <div class="btns" style="margin-top:10px;">
-          <button class="primary" id="autoBtn">Autoarmar (balanceado)</button>
-          <button class="ghost" id="clearBtn">Limpiar equipos</button>
+          <button class="ghost" id="opClearPool">Limpiar pool</button>
         </div>
-        <div class="hint" id="statusTeams" style="margin-top:8px;"></div>
+
+        <div id="opStatus" class="hint" style="margin-top:8px;"></div>
       </div>
 
-      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; margin-top:12px;">
-        <div class="card">
-          <h3 style="margin:0 0 10px;">Pool (${poolArr.length}/${total})</h3>
-          <div id="poolList" style="display:grid; gap:8px;"></div>
+      <div class="card" style="margin-top:14px;">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+          <div>
+            <label>Buscar</label>
+            <input id="opSearch" placeholder="Filtrar por nombre..." />
+          </div>
+          <div>
+            <label>Ordenar</label>
+            <select id="opSort">
+              <option value="name">Nombre</option>
+              <option value="ratingDesc">Nivel (mayor→menor)</option>
+              <option value="ratingAsc">Nivel (menor→mayor)</option>
+              <option value="side">Lado (D/R)</option>
+            </select>
+          </div>
         </div>
 
-        <div class="card">
-          <h3 style="margin:0 0 10px;">Equipo A (${aArr.length}/${size}) • D:${aD}/${need} R:${aR}/${need}</h3>
-          <div id="aList" style="display:grid; gap:8px;"></div>
-        </div>
-
-        <div class="card">
-          <h3 style="margin:0 0 10px;">Equipo B (${bArr.length}/${size}) • D:${bD}/${need} R:${bR}/${need}</h3>
-          <div id="bList" style="display:grid; gap:8px;"></div>
+        <div id="opList" style="margin-top:12px; display:grid; gap:8px;"></div>
+        <div class="hint muted" style="margin-top:10px;">
+          Selecciona con checkbox. N se ajusta automáticamente a múltiplos de 4.
         </div>
       </div>
     `;
 
-    const st = $("statusTeams");
-    const setStatus = (msg, kind) => {
-      st.textContent = msg;
-      st.className = "hint " + (kind || "");
-    };
+    const poolHint = $("opPoolHint");
+    const status = $("opStatus");
 
-    function cardRow(p, actionsHtml) {
-      return `
-        <div class="card" style="padding:10px 12px; background: rgba(0,0,0,.18);">
-          <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
-            <div><b>${p.name}</b> <span class="pill">${p.side}</span> <span class="pill">${p.rating}</span></div>
-            <div class="btns">${actionsHtml}</div>
+    // Hint del pool según N actual
+    if (poolIds.size < n) {
+      setStatus(poolHint, `Faltan ${n - poolIds.size} jugadores para completar N=${n}.`, "warn");
+    } else if (poolIds.size > n) {
+      setStatus(poolHint, `Hay más que N=${n}. Se usará N automático; ajusta seleccionando/deseleccionando.`, "warn");
+    } else if (d === needSide && r === needSide) {
+      setStatus(poolHint, "✅ Pool completo y balanceado D/R.", "ok");
+    } else {
+      setStatus(poolHint, `❌ Pool completo pero mix incorrecto. D=${d} R=${r}`, "error");
+    }
+
+    // Agregar jugador
+    $("opAdd").addEventListener("click", () => {
+      const name = norm($("opName").value);
+      const side = $("opSide").value === "R" ? "R" : "D";
+      const rating = clamp(Number($("opRating").value || 5), 1, 10);
+
+      if (!name) return setStatus(status, "Escribe un nombre.", "error");
+      const exists = players.some(p => norm(p.name).toLowerCase() === name.toLowerCase());
+      if (exists) return setStatus(status, "Ese nombre ya existe.", "error");
+
+      players.push({ id: uid(), name, side, rating });
+      saveJSON(KEY_PLAYERS, players);
+      $("opName").value = "";
+      $("opRating").value = "5";
+      setStatus(status, "✅ Jugador agregado.", "ok");
+      renderBase();
+      updateBadges();
+    });
+
+    // Limpiar pool
+    $("opClearPool").addEventListener("click", () => {
+      poolIds.clear();
+      persistPoolAndAutoN();
+      setStatus(status, "Pool limpiado.", "ok");
+      renderBase();
+    });
+
+    // Lista editable + selección pool
+    const listEl = $("opList");
+    const searchEl = $("opSearch");
+    const sortEl = $("opSort");
+
+    function renderList() {
+      const q = norm(searchEl.value).toLowerCase();
+      const sort = sortEl.value;
+
+      let items = players.filter(p => norm(p.name).toLowerCase().includes(q));
+      if (sort === "name") items.sort((a,b)=>norm(a.name).localeCompare(norm(b.name)));
+      if (sort === "ratingDesc") items.sort((a,b)=>b.rating-a.rating || norm(a.name).localeCompare(norm(b.name)));
+      if (sort === "ratingAsc") items.sort((a,b)=>a.rating-b.rating || norm(a.name).localeCompare(norm(b.name)));
+      if (sort === "side") items.sort((a,b)=>a.side.localeCompare(b.side) || norm(a.name).localeCompare(norm(b.name)));
+
+      // límite de selección total (24)
+      const disableMore = (poolIds.size >= 24);
+
+      listEl.innerHTML = items.map(p => {
+        const checked = poolIds.has(p.id);
+        const disabled = (!checked && disableMore);
+        return `
+          <div class="card" style="padding:10px 12px; background: rgba(0,0,0,.18);">
+            <div style="display:grid; grid-template-columns: auto 1fr .6fr .6fr auto; gap:10px; align-items:center;">
+              <input type="checkbox" data-act="pick" data-id="${p.id}" ${checked ? "checked":""} ${disabled ? "disabled":""} />
+              <input data-act="name" data-id="${p.id}" value="${escapeHtml(p.name)}" style="font-weight:800;" />
+              <select data-act="side" data-id="${p.id}">
+                <option value="D" ${p.side==="D"?"selected":""}>D</option>
+                <option value="R" ${p.side==="R"?"selected":""}>R</option>
+              </select>
+              <input data-act="rating" data-id="${p.id}" type="number" min="1" max="10" value="${p.rating}" />
+              <button class="ghost small" data-act="del" data-id="${p.id}">Borrar</button>
+            </div>
           </div>
-        </div>
-      `;
-    }
+        `;
+      }).join("");
 
-    // Bloqueo D/R manual
-    function canMoveToTeam(teamSet, p) {
-      if (teamSet.size >= size) return false;
-      const d = countSide(teamSet, players, "D");
-      const r = countSide(teamSet, players, "R");
-      if (p.side === "D" && d >= need) return false;
-      if (p.side === "R" && r >= need) return false;
-      return true;
-    }
+      // pick pool
+      listEl.querySelectorAll("[data-act='pick']").forEach(cb => {
+        cb.addEventListener("change", () => {
+          const id = cb.getAttribute("data-id");
+          if (!id) return;
+          if (cb.checked) poolIds.add(id);
+          else poolIds.delete(id);
 
-    // Pool → A/B (con bloqueo)
-    $("poolList").innerHTML = poolArr.map(p => {
-      const disA = !canMoveToTeam(A, p);
-      const disB = !canMoveToTeam(B, p);
-      return cardRow(p, `
-        <button class="ghost small" data-m="A" data-id="${p.id}" ${disA ? "disabled":""}>→ A</button>
-        <button class="ghost small" data-m="B" data-id="${p.id}" ${disB ? "disabled":""}>→ B</button>
-      `);
-    }).join("") || `<div class="hint muted">Vacío. Selecciona jugadores en Base.</div>`;
-
-    // A/B → Pool
-    $("aList").innerHTML = aArr.map(p => cardRow(p, `
-      <button class="ghost small" data-m="POOL" data-id="${p.id}">← Pool</button>
-    `)).join("") || `<div class="hint muted">Vacío.</div>`;
-
-    $("bList").innerHTML = bArr.map(p => cardRow(p, `
-      <button class="ghost small" data-m="POOL" data-id="${p.id}">← Pool</button>
-    `)).join("") || `<div class="hint muted">Vacío.</div>`;
-
-    // Bind mover
-    mount.querySelectorAll("[data-m]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const id = btn.getAttribute("data-id");
-        const move = btn.getAttribute("data-m");
-        if (!id || !move) return;
-
-        const p = players.find(x => x.id === id);
-        if (!p) return;
-
-        let pool2 = getPool();
-        let A2 = getTeamA();
-        let B2 = getTeamB();
-
-        // quita de todos
-        pool2.delete(id); A2.delete(id); B2.delete(id);
-
-        if (move === "A") {
-          if (!canMoveToTeam(A2, p)) return;
-          A2.add(id);
-        } else if (move === "B") {
-          if (!canMoveToTeam(B2, p)) return;
-          B2.add(id);
-        } else {
-          pool2.add(id);
-        }
-
-        ({ pool: pool2, A: A2, B: B2 } = normalizeState(players, pool2, A2, B2));
-        render();
+          persistPoolAndAutoN();
+          renderBase(); // para que el hint y N se actualicen al instante
+        });
       });
-    });
 
-    // Limpiar equipos
-    $("clearBtn").addEventListener("click", () => {
-      const pool2 = new Set([...getPool(), ...getTeamA(), ...getTeamB()]);
-      setPool(pool2);
-      setTeamA(new Set());
-      setTeamB(new Set());
-      setStatus("Equipos limpiados (devueltos al pool).", "ok");
-      render();
-    });
+      // editar nombre
+      listEl.querySelectorAll("[data-act='name']").forEach(inp => {
+        inp.addEventListener("blur", () => {
+          const id = inp.getAttribute("data-id");
+          const p = players.find(x => x.id === id);
+          if (!p) return;
+          const newName = norm(inp.value);
+          if (!newName) { inp.value = p.name; return; }
+          const exists = players.some(x => x.id !== id && norm(x.name).toLowerCase() === newName.toLowerCase());
+          if (exists) { inp.value = p.name; return; }
+          p.name = newName;
+          saveJSON(KEY_PLAYERS, players);
+          updateBadges();
+        });
+      });
 
-    // Autoarmar
-    $("autoBtn").addEventListener("click", () => {
-      const res = autoBuild(players, getPool());
-      if (!res.ok) return setStatus(res.msg, "error");
+      // editar lado
+      listEl.querySelectorAll("[data-act='side']").forEach(sel => {
+        sel.addEventListener("change", () => {
+          const id = sel.getAttribute("data-id");
+          const p = players.find(x => x.id === id);
+          if (!p) return;
+          p.side = (sel.value === "R") ? "R" : "D";
+          saveJSON(KEY_PLAYERS, players);
+          // si está en pool, recalcula hints y notifica
+          if (poolIds.has(id)) persistPoolAndAutoN();
+          renderBase();
+        });
+      });
 
-      setTeamA(res.A);
-      setTeamB(res.B);
-      setPool(new Set());
+      // editar rating
+      listEl.querySelectorAll("[data-act='rating']").forEach(inp => {
+        inp.addEventListener("change", () => {
+          const id = inp.getAttribute("data-id");
+          const p = players.find(x => x.id === id);
+          if (!p) return;
+          p.rating = clamp(Number(inp.value || 5), 1, 10);
+          inp.value = String(p.rating);
+          saveJSON(KEY_PLAYERS, players);
+        });
+      });
 
-      setStatus(res.msg + " (puedes repetir cambiando el pool en Base)", "ok");
-      render();
-    });
+      // borrar
+      listEl.querySelectorAll("[data-act='del']").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const id = btn.getAttribute("data-id");
+          if (!id) return;
+          players = players.filter(p => p.id !== id);
+          poolIds.delete(id);
+          saveJSON(KEY_PLAYERS, players);
+          persistPoolAndAutoN();
+          renderBase();
+        });
+      });
+    }
+
+    searchEl.addEventListener("input", renderList);
+    sortEl.addEventListener("change", renderList);
+
+    renderList();
+    updateBadges();
   }
 
-  // Exponer refresh para app.js
-  window.OP = window.OP || {};
-  window.OP.refresh = (view) => {
-    if (view === "teams") render();
-  };
-
-  document.addEventListener("DOMContentLoaded", render);
+  document.addEventListener("DOMContentLoaded", () => {
+    renderBase();
+    updateBadges();
+    console.log("✅ db.js listo (auto N + sync)");
+  });
 })();
