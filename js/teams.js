@@ -200,6 +200,7 @@
 
   // Si cambias el pool en Base y luego vienes a Equipos, se refresca al entrar
   window.addEventListener("focus", () => {
-    const mount = document.getElementB
+    const mount = document.getElementById("teamsMount");
+    if (mount && mount.innerHTML.trim()) renderTeams();
   });
 })();
