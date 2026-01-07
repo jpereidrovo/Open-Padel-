@@ -61,6 +61,7 @@
       border: 1px solid rgba(255,255,255,.16);
       background: rgba(0,0,0,.12);
       font-weight: 800;
+      white-space:nowrap;
     }
 
     .sidebarCard {
@@ -143,12 +144,8 @@
     .split { display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; }
     .sectionTitle { margin: 0 0 10px; font-size: 16px; }
 
-    .quedadaGrid {
-      display:grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 14px;
-      align-items:start;
-    }
+    .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items:start; }
+    .grid3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; align-items:start; }
     .teamList { display:grid; gap:8px; }
     .teamItem {
       display:grid;
@@ -180,7 +177,6 @@
     .scoreRow { display:grid; grid-template-columns: 1fr 190px; gap:10px; align-items:center; }
     .mini { font-size: 12px; opacity:.85; }
 
-    /* Turn pair styling */
     .pairText { font-weight: 850; letter-spacing: .1px; }
     .pairText .badge { margin-left: 6px; }
     .pairSep { opacity:.85; font-weight: 900; }
@@ -188,7 +184,8 @@
     @media (max-width: 1100px){
       .appShell { grid-template-columns: 1fr; }
       .sidebar { position: relative; height: auto; }
-      .quedadaGrid { grid-template-columns: 1fr; }
+      .grid3 { grid-template-columns: 1fr; }
+      .grid2 { grid-template-columns: 1fr; }
     }
 
     @media print {
@@ -208,7 +205,7 @@
       <div class="logo">OP</div>
       <div class="brandTitle">
         <b>Open Padel</b>
-        <span>Base + Quedadas</span>
+        <span>Base • Equipos • Turnos</span>
       </div>
     </div>
 
@@ -225,17 +222,22 @@
         <span>👤 Base de jugadores</span>
         <span class="tag" id="tagBase">0</span>
       </button>
-      <button class="navBtn" id="navQuedada">
-        <span>🎾 Quedada</span>
-        <span class="tag" id="tagQuedada">0/16</span>
+      <button class="navBtn" id="navTeams">
+        <span>🅰️🅱️ Equipos</span>
+        <span class="tag" id="tagTeams">0/16</span>
+      </button>
+      <button class="navBtn" id="navTurns">
+        <span>🎾 Turnos</span>
+        <span class="tag" id="tagTurns">0</span>
       </button>
     </div>
 
     <div class="sidebarCard">
       <div class="hint">
         <b>Flujo recomendado</b><br/>
-        1) En <b>Base</b> agrega/edita y selecciona jugadores.<br/>
-        2) En <b>Quedada</b> arma A/B y genera turnos.
+        1) En <b>Base</b> selecciona jugadores (pool).<br/>
+        2) En <b>Equipos</b> arma A/B (manual o auto).<br/>
+        3) En <b>Turnos</b> genera cruces y exporta.
       </div>
       <div class="pill" id="pillInfo">N: <b>16</b> • Canchas: <b>4</b></div>
     </div>
@@ -243,6 +245,7 @@
 
   <main class="main">
     <div id="appRoot" style="display:none;">
+      <!-- BASE -->
       <section id="viewBase">
         <div class="card">
           <div class="split">
@@ -274,7 +277,7 @@
           <div style="height:10px"></div>
           <div class="btns">
             <button class="ghost" id="clearSelection">Limpiar selección</button>
-            <button class="primary" id="goQuedada">Ir a Quedada →</button>
+            <button class="primary" id="goTeams">Ir a Equipos →</button>
           </div>
         </div>
 
@@ -341,20 +344,22 @@
         </div>
       </section>
 
-      <section id="viewQuedada" style="display:none;">
+      <!-- TEAMS -->
+      <section id="viewTeams" style="display:none;">
         <div class="card">
           <div class="split">
-            <h2 class="sectionTitle">Quedada</h2>
-            <div class="pill" id="poolInfo">0/16 • D:0 R:0</div>
+            <h2 class="sectionTitle">Equipos</h2>
+            <div class="pill" id="teamsInfo">0/16 • D:0 R:0</div>
           </div>
 
           <div class="btns">
-            <button class="primary" id="autoTeams">Autoarmar A/B (balanceado)</button>
-            <button class="ghost" id="clearAll">Limpiar quedada</button>
+            <button class="primary" id="autoTeams">Autoarmar A/B (otra alternativa)</button>
+            <button class="ghost" id="clearTeams">Limpiar Equipos</button>
             <button class="ghost" id="backBase">← Volver a Base</button>
+            <button class="ghost" id="goTurns">Ir a Turnos →</button>
           </div>
 
-          <div id="status" class="hint" style="margin-top:10px;"></div>
+          <div id="teamsStatus" class="hint" style="margin-top:10px;"></div>
 
           <div style="height:10px"></div>
           <div class="pill" id="pillPlayers">N: <b>16</b></div>
@@ -363,7 +368,7 @@
 
         <div style="height:14px"></div>
 
-        <div class="quedadaGrid">
+        <div class="grid3">
           <div class="card">
             <div class="split">
               <h2 class="sectionTitle">Pool</h2>
@@ -397,34 +402,44 @@
               <button class="ghost" id="teamBClear">Vaciar B</button>
             </div>
             <div id="teamBStatus" class="hint"></div>
+          </div>
+        </div>
+      </section>
 
-            <hr style="border:none;border-top:1px solid rgba(255,255,255,.12);margin:14px 0;" />
-
+      <!-- TURNS -->
+      <section id="viewTurns" style="display:none;">
+        <div class="card">
+          <div class="split">
             <h2 class="sectionTitle">Turnos</h2>
-            <div class="row">
-              <div>
-                <label>No repetir parejas</label>
-                <select id="noRepeatPairs">
-                  <option value="yes" selected>Sí</option>
-                  <option value="no">No</option>
-                </select>
-              </div>
-              <div>
-                <label>Exportar</label>
-                <select id="exportMode">
-                  <option value="csv">Excel (CSV)</option>
-                  <option value="pdf">PDF (Imprimir)</option>
-                </select>
-              </div>
-            </div>
+            <div class="pill" id="turnsInfo">Listo para generar</div>
+          </div>
 
-            <div style="height:10px"></div>
-            <div class="btns">
-              <button class="primary" id="gen">Generar 3 turnos</button>
-              <button class="ghost" id="export">Exportar</button>
-              <button class="ghost" id="copy">Copiar</button>
+          <div class="row">
+            <div>
+              <label>No repetir parejas</label>
+              <select id="noRepeatPairs">
+                <option value="yes" selected>Sí</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+            <div>
+              <label>Exportar</label>
+              <select id="exportMode">
+                <option value="csv">Excel (CSV)</option>
+                <option value="pdf">PDF (Imprimir)</option>
+              </select>
             </div>
           </div>
+
+          <div style="height:10px"></div>
+          <div class="btns">
+            <button class="primary" id="gen">Generar turnos (otra alternativa)</button>
+            <button class="ghost" id="export">Exportar</button>
+            <button class="ghost" id="copy">Copiar</button>
+            <button class="ghost" id="backTeams">← Volver a Equipos</button>
+          </div>
+
+          <div id="turnsStatus" class="hint" style="margin-top:10px;"></div>
         </div>
 
         <div style="height:14px"></div>
@@ -432,7 +447,7 @@
           <h2 class="sectionTitle">Cruces</h2>
           <div id="out" class="list"></div>
           <div class="hint muted" style="margin-top:10px;">
-            PDF: Exportar → imprimir → Guardar como PDF.
+            Puedes apretar “Generar turnos” varias veces para obtener cruces diferentes.
           </div>
         </div>
       </section>
@@ -447,6 +462,9 @@
 
 <script>
 (() => {
+  // =====================
+  // Supabase config
+  // =====================
   const SUPABASE_URL = "https://tuquyruyyizzccxrvafc.supabase.co";
   const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1cXV5cnV5eWl6emNjeHJ2YWZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MTY5NjgsImV4cCI6MjA4MzI5Mjk2OH0.mTsLI_LQC9ccI7Yoc8UL7coGqQlab8NTp3ItFnX7nnE";
 
@@ -455,17 +473,6 @@
   const logoutBtn = document.getElementById("logoutBtn");
   const appRoot = document.getElementById("appRoot");
   const loggedOut = document.getElementById("loggedOut");
-
-  const navBase = document.getElementById("navBase");
-  const navQuedada = document.getElementById("navQuedada");
-  const viewBase = document.getElementById("viewBase");
-  const viewQuedada = document.getElementById("viewQuedada");
-  const goQuedada = document.getElementById("goQuedada");
-  const backBase = document.getElementById("backBase");
-
-  const tagBase = document.getElementById("tagBase");
-  const tagQuedada = document.getElementById("tagQuedada");
-  const pillInfo = document.getElementById("pillInfo");
 
   if (!window.supabase || !window.supabase.createClient) {
     authStatusEl.textContent = "Error: no cargó Supabase JS.";
@@ -487,16 +494,40 @@
     location.reload();
   });
 
-  const STORE_STATE = "open_padel_state_sidebar_v3";
-  const STORE_SCORES = "open_padel_scores_sidebar_v3";
+  // =====================
+  // App state
+  // =====================
+  const STORE_STATE = "open_padel_state_nav_v1";
+  const STORE_SCORES = "open_padel_scores_nav_v1";
   const TURNS = 3;
 
   const $ = (id)=>document.getElementById(id);
 
+  // Nav / Views
+  const navBase = $("navBase");
+  const navTeams = $("navTeams");
+  const navTurns = $("navTurns");
+  const viewBase = $("viewBase");
+  const viewTeams = $("viewTeams");
+  const viewTurns = $("viewTurns");
+
+  const goTeams = $("goTeams");
+  const goTurns = $("goTurns");
+  const backBase = $("backBase");
+  const backTeams = $("backTeams");
+
+  // Badges
+  const tagBase = $("tagBase");
+  const tagTeams = $("tagTeams");
+  const tagTurns = $("tagTurns");
+  const pillInfo = $("pillInfo");
+
+  // Base UI
   const totalPlayersEl = $("totalPlayers");
   const selCountText = $("selCountText");
   const selSideText = $("selSideText");
   const selNeedText = $("selNeedText");
+  const clearSelectionBtn = $("clearSelection");
 
   const dbName = $("dbName");
   const dbSide = $("dbSide");
@@ -507,13 +538,12 @@
   const dbList = $("dbList");
   const dbCount = $("dbCount");
   const dbStatus = $("dbStatus");
-  const clearSelectionBtn = $("clearSelection");
 
-  const poolInfo = $("poolInfo");
-  const status = $("status");
+  // Teams UI
+  const teamsInfo = $("teamsInfo");
+  const teamsStatus = $("teamsStatus");
   const poolList = $("poolList");
   const poolStatus = $("poolStatus");
-
   const teamAList = $("teamAList");
   const teamBList = $("teamBList");
   const teamAInfo = $("teamAInfo");
@@ -523,8 +553,13 @@
   const teamAStatus = $("teamAStatus");
   const teamBStatus = $("teamBStatus");
   const autoTeamsBtn = $("autoTeams");
-  const clearAllBtn = $("clearAll");
+  const clearTeamsBtn = $("clearTeams");
+  const pillPlayers = $("pillPlayers");
+  const pillCourts = $("pillCourts");
 
+  // Turns UI
+  const turnsInfo = $("turnsInfo");
+  const turnsStatus = $("turnsStatus");
   const noRepeatPairsEl = $("noRepeatPairs");
   const exportModeEl = $("exportMode");
   const genBtn = $("gen");
@@ -532,15 +567,19 @@
   const copyBtn = $("copy");
   const out = $("out");
 
-  const pillPlayers = $("pillPlayers");
-  const pillCourts = $("pillCourts");
+  /** @typedef {{id:string, name:string, side:'D'|'R', rating:number}} PlayerDB */
+  /** @type {PlayerDB[]} */ let db = [];
+  /** @type {{id:string}[]} */ let selected = []; // pool
+  /** @type {{id:string}[]} */ let teamA = [];
+  /** @type {{id:string}[]} */ let teamB = [];
+  /** @type {Map<string,string>} */ let scores = new Map();
 
-  let db = [];
-  let selected = [];
-  let teamA = [];
-  let teamB = [];
-  let scores = new Map();
+  // session-only “mejor balance encontrado”
+  let bestAuto = { diff: Infinity, sumA: 0, sumB: 0 };
 
+  // =====================
+  // Helpers
+  // =====================
   function totalPlayers(){ return Number(totalPlayersEl.value); }
   function teamSize(){ return totalPlayers() / 2; }
   function courts(){ return totalPlayers() / 4; }
@@ -601,7 +640,9 @@
         selected = Array.isArray(st.selected) ? st.selected : [];
         teamA = Array.isArray(st.teamA) ? st.teamA : [];
         teamB = Array.isArray(st.teamB) ? st.teamB : [];
-        if (st.view === "quedada") setView("quedada"); else setView("base");
+        if (st.view === "teams") setView("teams");
+        else if (st.view === "turns") setView("turns");
+        else setView("base");
       } else {
         setView("base");
       }
@@ -615,30 +656,38 @@
     }
   }
 
+  // =====================
+  // Navigation
+  // =====================
   function setView(view){
-    if(view === "quedada"){
-      viewBase.style.display = "none";
-      viewQuedada.style.display = "block";
-      navBase.classList.remove("active");
-      navQuedada.classList.add("active");
-    } else {
-      viewBase.style.display = "block";
-      viewQuedada.style.display = "none";
-      navBase.classList.add("active");
-      navQuedada.classList.remove("active");
-    }
+    viewBase.style.display  = (view==="base")  ? "block" : "none";
+    viewTeams.style.display = (view==="teams") ? "block" : "none";
+    viewTurns.style.display = (view==="turns") ? "block" : "none";
+
+    navBase.classList.toggle("active", view==="base");
+    navTeams.classList.toggle("active", view==="teams");
+    navTurns.classList.toggle("active", view==="turns");
+
     saveLocalState();
   }
 
   function getView(){
-    return viewQuedada.style.display === "block" ? "quedada" : "base";
+    if(viewTeams.style.display==="block") return "teams";
+    if(viewTurns.style.display==="block") return "turns";
+    return "base";
   }
 
   navBase.addEventListener("click", ()=>setView("base"));
-  navQuedada.addEventListener("click", ()=>setView("quedada"));
-  goQuedada.addEventListener("click", ()=>setView("quedada"));
+  navTeams.addEventListener("click", ()=>setView("teams"));
+  navTurns.addEventListener("click", ()=>setView("turns"));
+  goTeams.addEventListener("click", ()=>setView("teams"));
+  goTurns.addEventListener("click", ()=>setView("turns"));
   backBase.addEventListener("click", ()=>setView("base"));
+  backTeams.addEventListener("click", ()=>setView("teams"));
 
+  // =====================
+  // Supabase DB functions
+  // =====================
   async function loadDBFromSupabase() {
     const { data, error } = await sb.from("players").select("*").order("name");
     if (error) throw error;
@@ -655,9 +704,16 @@
     if (error) throw error;
   }
 
+  // =====================
+  // Rendering
+  // =====================
   function renderSidebarBadges(){
     tagBase.textContent = String(db.length);
-    tagQuedada.textContent = `${selected.length + teamA.length + teamB.length}/${totalPlayers()}`;
+    tagTeams.textContent = `${selected.length + teamA.length + teamB.length}/${totalPlayers()}`;
+
+    const hasTurns = out.children.length > 0;
+    tagTurns.textContent = hasTurns ? "✅" : "—";
+
     pillInfo.innerHTML = `N: <b>${totalPlayers()}</b> • Canchas: <b>${courts()}</b>`;
   }
 
@@ -670,6 +726,7 @@
     const d = countSide(selected,"D");
     const r = countSide(selected,"R");
     const need = totalPerSide();
+
     selCountText.textContent = `${selected.length}/${totalPlayers()}`;
     selSideText.textContent = `D:${d} R:${r}`;
 
@@ -694,9 +751,19 @@
       }
     }
     selNeedText.textContent = msg;
+  }
 
+  function renderTeamsHeader(){
     const totalPicked = selected.length + teamA.length + teamB.length;
-    poolInfo.textContent = `${totalPicked}/${totalPlayers()} • D:${countSide(selected,"D")+countSide(teamA,"D")+countSide(teamB,"D")} R:${countSide(selected,"R")+countSide(teamA,"R")+countSide(teamB,"R")}`;
+    const d = countSide(selected,"D")+countSide(teamA,"D")+countSide(teamB,"D");
+    const r = countSide(selected,"R")+countSide(teamA,"R")+countSide(teamB,"R");
+    teamsInfo.textContent = `${totalPicked}/${totalPlayers()} • D:${d} R:${r}`;
+
+    if(teamA.length===teamSize() && teamB.length===teamSize()){
+      turnsInfo.textContent = `A y B listos • Canchas: ${courts()} • Turnos: ${TURNS}`;
+    } else {
+      turnsInfo.textContent = `Completa equipos A/B para generar`;
+    }
   }
 
   function renderDB(){
@@ -790,6 +857,7 @@
 
         scores.clear();
         clearOutput();
+        bestAuto = { diff: Infinity, sumA: 0, sumB: 0 };
         saveLocalState();
         render();
       });
@@ -861,6 +929,7 @@
           setStatus(dbStatus, "Lado actualizado.", "ok");
           scores.clear();
           clearOutput();
+          bestAuto = { diff: Infinity, sumA: 0, sumB: 0 };
           saveLocalState();
           render();
         }catch(e){
@@ -884,6 +953,7 @@
           await updatePlayerInSupabase(id, { rating: n });
           await loadDBFromSupabase();
           setStatus(dbStatus, "Nivel actualizado.", "ok");
+          bestAuto = { diff: Infinity, sumA: 0, sumB: 0 };
           saveLocalState();
           render();
         }catch(e){
@@ -950,6 +1020,7 @@
           if(label==="Equipo A") teamA = teamA.filter(r=>r.id!==p.id);
           else teamB = teamB.filter(r=>r.id!==p.id);
           scores.clear(); clearOutput();
+          bestAuto = { diff: Infinity, sumA: 0, sumB: 0 };
           saveLocalState(); render();
         });
 
@@ -958,6 +1029,7 @@
           if(label==="Equipo A") teamA = teamA.filter(r=>r.id!==p.id);
           else teamB = teamB.filter(r=>r.id!==p.id);
           scores.clear(); clearOutput();
+          bestAuto = { diff: Infinity, sumA: 0, sumB: 0 };
           saveLocalState(); render();
         });
 
@@ -975,12 +1047,16 @@
   function render(){
     renderPills();
     renderSelectionHeader();
+    renderTeamsHeader();
     renderDB();
     renderPool();
     renderTeams();
     renderSidebarBadges();
   }
 
+  // =====================
+  // Actions
+  // =====================
   function moveSelectedToTeam(id, team){
     if(!selected.some(r=>r.id===id)) return setStatus(poolStatus, "Ese jugador no está en el pool.", "error");
     if(team==="A" && teamA.length>=teamSize()) return setStatus(teamAStatus, `A ya tiene ${teamSize()}.`, "error");
@@ -998,6 +1074,7 @@
 
     scores.clear();
     clearOutput();
+    bestAuto = { diff: Infinity, sumA: 0, sumB: 0 };
     saveLocalState();
     render();
   }
@@ -1024,7 +1101,9 @@
       throw new Error(`Equipo B debe tener ${perTeamSide()}D y ${perTeamSide()}R.`);
   }
 
-  // ===== Turn formatting with badges (no rating) =====
+  // =====================
+  // Turn formatting with badges (no rating)
+  // =====================
   function playerHtml(p){
     return `<span class="pName">${escapeHtml(normalizeName(p.name))}</span> <span class="badge">${escapeHtml(p.side)}</span>`;
   }
@@ -1032,21 +1111,24 @@
     return `${playerHtml(pair[0])} <span class="pairSep">+</span> ${playerHtml(pair[1])}`;
   }
   function pairText(pair){
-  // Plain text for CSV/copy (no badges)
-  const a = `${normalizeName(pair[0].name)} (${pair[0].side})`;
-  const b = `${normalizeName(pair[1].name)} (${pair[1].side})`;
-  return `${a} + ${b}`;
+    const a = `${normalizeName(pair[0].name)} (${pair[0].side})`;
+    const b = `${normalizeName(pair[1].name)} (${pair[1].side})`;
+    return `${a} + ${b}`;
   }
 
-  // ===== Autoarmado mejorado =====
+  // =====================
+  // AUTOARMADO (dinámico: cada click nueva alternativa)
+  // - Para variar: shuffle intermedio + seed random
+  // - Trackea mejor diff en sesión
+  // =====================
   function autoBuildTeamsBalancedFromSelected(){
+    validateSelectedOrThrow();
+
     const allIds = new Set([
       ...selected.map(r=>r.id),
       ...teamA.map(r=>r.id),
       ...teamB.map(r=>r.id),
     ]);
-
-    if(allIds.size !== totalPlayers()) throw new Error(`Selecciona exactamente ${totalPlayers()} jugadores antes de autoarmar.`);
 
     const players = [...allIds].map(id=>byId(id)).filter(Boolean);
     const needPerSide = totalPerSide();
@@ -1058,7 +1140,17 @@
     if(Ds.length !== needPerSide || Rs.length !== needPerSide){
       throw new Error(`Los ${totalPlayers()} seleccionados deben tener ${needPerSide}D y ${needPerSide}R.`);
     }
-    if(needPerTeamSide < 1) throw new Error("Cantidad inválida para autoarmar.");
+
+    // Aleatoriza un poco el “orden” (sin destruir el peso del rating)
+    function jitterSort(arr){
+      return arr
+        .map(p => ({p, k: p.rating + (Math.random()*0.8 - 0.4)}))
+        .sort((a,b)=>b.k-a.k)
+        .map(x=>x.p);
+    }
+
+    const DsJ = jitterSort(Ds);
+    const RsJ = jitterSort(Rs);
 
     const A=[], B=[];
     let sumA=0, sumB=0;
@@ -1083,14 +1175,24 @@
       }
     }
 
-    add("A", Ds[0]); add("B", Ds[1]);
-    add("A", Rs[0]); add("B", Rs[1]);
+    // seed: reparte top 2 de cada lado en distinto equipo (pero con orden variable por jitter)
+    add("A", DsJ[0]); add("B", DsJ[1]);
+    add("A", RsJ[0]); add("B", RsJ[1]);
 
-    const restD = Ds.slice(2);
-    const restR = Rs.slice(2);
+    const restD = DsJ.slice(2);
+    const restR = RsJ.slice(2);
+
+    function shuffle(arr){
+      for(let i=arr.length-1;i>0;i--){
+        const j = Math.floor(Math.random()*(i+1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
 
     function greedyFill(list){
-      for(const p of list){
+      const L = shuffle(list.slice());
+      for(const p of L){
         const okA = canAdd("A", p);
         const okB = canAdd("B", p);
 
@@ -1102,22 +1204,27 @@
         const diffIfB = Math.abs(sumA - (sumB + p.rating));
         if(diffIfA < diffIfB) add("A", p);
         else if(diffIfB < diffIfA) add("B", p);
-        else { if(sumA <= sumB) add("A", p); else add("B", p); }
+        else { if(Math.random()<0.5) add("A", p); else add("B", p); }
       }
     }
 
     greedyFill(restD);
     greedyFill(restR);
 
+    // swaps locales para mejorar
     function improveSwaps(side){
       let improved = true;
       let loops = 0;
-      while(improved && loops < 400){
+      while(improved && loops < 300){
         loops++;
         improved = false;
         const aList = A.filter(x=>x.side===side);
         const bList = B.filter(x=>x.side===side);
         const baseDiff = Math.abs(sumA - sumB);
+
+        // iteración aleatoria para variedad
+        shuffle(aList);
+        shuffle(bList);
 
         for(const pa of aList){
           for(const pb of bList){
@@ -1144,18 +1251,34 @@
     teamB = B.map(p=>({id:p.id}));
     selected = [];
 
+    // reset turns when teams change
     scores.clear();
     clearOutput();
+
     saveLocalState();
     render();
 
-    const avgA = Math.round((sumA / A.length) * 100) / 100;
-    const avgB = Math.round((sumB / B.length) * 100) / 100;
-    const diff = Math.round(Math.abs(avgA - avgB) * 100) / 100;
+    const avgA = sumA / A.length;
+    const avgB = sumB / B.length;
+    const diff = Math.abs(avgA - avgB);
 
-    setStatus(status, `✅ Autoarmado: prom A=${avgA} • prom B=${avgB} • Δ=${diff}`, diff<=0.2 ? "ok" : (diff<=0.5 ? "warn" : "error"));
+    if(diff < bestAuto.diff){
+      bestAuto = { diff, sumA, sumB };
+    }
+
+    const fmt = (x)=>Math.round(x*100)/100;
+    const kind = diff<=0.2 ? "ok" : (diff<=0.5 ? "warn" : "error");
+
+    setStatus(
+      teamsStatus,
+      `✅ Nueva alternativa: prom A=${fmt(avgA)} • prom B=${fmt(avgB)} • Δ=${fmt(diff)} | Mejor sesión: Δ=${fmt(bestAuto.diff)}`,
+      kind
+    );
   }
 
+  // =====================
+  // Turnos generation (dinámico: cada click re-genera)
+  // =====================
   function shuffle(arr){
     for(let i=arr.length-1;i>0;i--){
       const j = Math.floor(Math.random()*(i+1));
@@ -1250,11 +1373,12 @@
     const usedPairsA = new Set();
     const usedPairsB = new Set();
 
+    // cada click = nuevo set de turnos => resetea salida, pero no borra marcadores existentes si el id coincide
     clearOutput();
 
     for(let t=1;t<=TURNS;t++){
       let ok=false;
-      const maxTries=9000;
+      const maxTries=12000;
 
       for(let attempt=0;attempt<maxTries;attempt++){
         const pairsA = buildPairs(teamA, avoidRepeatPairs ? usedPairsA : new Set());
@@ -1283,6 +1407,7 @@
     }
   }
 
+  // Export
   function exportCSV(){
     const rows=[];
     rows.push(["Turno","Cancha","Pareja A","Pareja B","Marcador"].join(","));
@@ -1295,7 +1420,8 @@
         const turnDiv = [...document.querySelectorAll(".turn")].find(x => x.querySelector("h3")?.innerText.includes(`Turno ${t}`));
         let pairA="", pairB="";
         if(turnDiv){
-          const courtDiv = [...turnDiv.querySelectorAll(".court")].find(x => x.querySelector("b")?.innerText === `Cancha ${c}`);
+          const courtsDiv = [...turnDiv.querySelectorAll(".court")];
+          const courtDiv = courtsDiv[c-1];
           if(courtDiv){
             const pairLines = courtDiv.querySelectorAll(".pairText");
             pairA = (pairLines[0]?.getAttribute("data-plain") || "").replaceAll('"','""');
@@ -1319,16 +1445,19 @@
   }
   function exportPDF(){ window.print(); }
 
-  // ===== Events (resto igual) =====
+  // =====================
+  // Events
+  // =====================
   totalPlayersEl.addEventListener("change", ()=>{
     selected = [];
     teamA = [];
     teamB = [];
     scores.clear();
     clearOutput();
+    bestAuto = { diff: Infinity, sumA: 0, sumB: 0 };
     saveLocalState();
     render();
-    setStatus(status, `Listo: selecciona ${totalPlayers()} jugadores (D:${totalPerSide()} R:${totalPerSide()}).`, "ok");
+    setStatus(dbStatus, `Listo: selecciona ${totalPlayers()} jugadores (D:${totalPerSide()} R:${totalPerSide()}).`, "ok");
   });
 
   clearSelectionBtn.addEventListener("click", ()=>{
@@ -1337,6 +1466,7 @@
     teamB = [];
     scores.clear();
     clearOutput();
+    bestAuto = { diff: Infinity, sumA: 0, sumB: 0 };
     saveLocalState();
     render();
     setStatus(dbStatus, "Selección limpia.", "ok");
@@ -1372,6 +1502,7 @@
     teamA.forEach(r=>{ if(!selected.some(x=>x.id===r.id)) selected.push({id:r.id}); });
     teamA=[];
     scores.clear(); clearOutput();
+    bestAuto = { diff: Infinity, sumA: 0, sumB: 0 };
     saveLocalState(); render();
     setStatus(teamAStatus, "A vacío (devuelto al pool).", "ok");
   });
@@ -1380,6 +1511,7 @@
     teamB.forEach(r=>{ if(!selected.some(x=>x.id===r.id)) selected.push({id:r.id}); });
     teamB=[];
     scores.clear(); clearOutput();
+    bestAuto = { diff: Infinity, sumA: 0, sumB: 0 };
     saveLocalState(); render();
     setStatus(teamBStatus, "B vacío (devuelto al pool).", "ok");
   });
@@ -1388,49 +1520,70 @@
     try{
       autoBuildTeamsBalancedFromSelected();
     }catch(e){
-      setStatus(status, e.message || String(e), "error");
+      setStatus(teamsStatus, e.message || String(e), "error");
     }
+  });
+
+  clearTeamsBtn.addEventListener("click", ()=>{
+    // devuelve A/B al pool
+    [...teamA, ...teamB].forEach(r => { if(!selected.some(x=>x.id===r.id)) selected.push({id:r.id}); });
+    teamA=[]; teamB=[];
+    scores.clear(); clearOutput();
+    bestAuto = { diff: Infinity, sumA: 0, sumB: 0 };
+    saveLocalState(); render();
+    setStatus(teamsStatus, "Equipos limpiados (todo volvió al pool).", "ok");
   });
 
   genBtn.addEventListener("click", ()=>{
     try{
+      // cada click = nueva alternativa de cruces
       generateTurns();
-      setStatus(status, "✅ Turnos generados.", "ok");
+      setStatus(turnsStatus, "✅ Turnos generados (nueva alternativa).", "ok");
       saveLocalState();
+      renderSidebarBadges();
     }catch(e){
-      setStatus(status, e.message || String(e), "error");
+      setStatus(turnsStatus, e.message || String(e), "error");
     }
   });
 
   exportBtn.addEventListener("click", ()=>{
-    if(!out.innerText.trim()) return setStatus(status, "Primero genera los turnos.", "error");
+    if(!out.innerText.trim()) return setStatus(turnsStatus, "Primero genera los turnos.", "error");
     if(exportModeEl.value==="csv") exportCSV();
     else exportPDF();
-    setStatus(status, "Exportación iniciada.", "ok");
+    setStatus(turnsStatus, "Exportación iniciada.", "ok");
   });
 
   copyBtn.addEventListener("click", async ()=>{
-    const text = out.innerText.trim();
-    if(!text) return setStatus(status, "No hay resultado para copiar.", "error");
+    // Copia texto limpio (sin badges)
+    const turns = [];
+    document.querySelectorAll(".turn").forEach(turnDiv=>{
+      const title = turnDiv.querySelector("h3")?.innerText?.trim() || "";
+      turns.push(title);
+      turnDiv.querySelectorAll(".court").forEach((cDiv, idx)=>{
+        const cancha = `Cancha ${idx+1}`;
+        const pairs = cDiv.querySelectorAll(".pairText");
+        const a = pairs[0]?.getAttribute("data-plain") || "";
+        const b = pairs[1]?.getAttribute("data-plain") || "";
+        const scoreInp = cDiv.querySelector("input[data-score-id]");
+        const score = scoreInp?.value?.trim() || "";
+        turns.push(`${cancha}: A ${a} vs B ${b}${score ? " | " + score : ""}`);
+      });
+      turns.push("");
+    });
+    const text = turns.join("\n").trim();
+
+    if(!text) return setStatus(turnsStatus, "No hay resultado para copiar.", "error");
     try{
       await navigator.clipboard.writeText(text);
-      setStatus(status, "Copiado ✅", "ok");
+      setStatus(turnsStatus, "Copiado ✅ (texto limpio)", "ok");
     }catch{
-      setStatus(status, "No se pudo copiar. Copia manualmente.", "error");
+      setStatus(turnsStatus, "No se pudo copiar. Copia manualmente.", "error");
     }
   });
 
-  clearAllBtn.addEventListener("click", ()=>{
-    selected=[];
-    teamA=[];
-    teamB=[];
-    scores.clear();
-    clearOutput();
-    saveLocalState();
-    render();
-    setStatus(status, "Quedada limpia (base se mantiene).", "ok");
-  });
-
+  // =====================
+  // Auth + init
+  // =====================
   async function initAfterLogin(){
     loadLocalState();
     await loadDBFromSupabase();
@@ -1441,7 +1594,9 @@
     teamB = teamB.filter(r=>ids.has(r.id));
 
     render();
-    setStatus(status, "Listo: selecciona jugadores en Base → arma en Quedada.", "ok");
+    setStatus(dbStatus, "Listo: selecciona jugadores en Base.", "ok");
+    setStatus(teamsStatus, "Arma A/B manual o usa Autoarmar (puedes apretar varias veces).", "muted");
+    setStatus(turnsStatus, "Genera turnos cuando A/B estén completos.", "muted");
   }
 
   async function checkSession(){
