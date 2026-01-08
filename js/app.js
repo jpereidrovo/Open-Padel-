@@ -48,4 +48,10 @@
 
   window.OP = window.OP || {};
   window.OP.show = show;
+  import { signInWithGoogle } from "./supabaseApi.js";
+
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = document.getElementById("loginGoogle");
+  if (btn) btn.addEventListener("click", () => signInWithGoogle());
+});
 })();
