@@ -1,6 +1,4 @@
-// teams.js — Equipos A/B con UX recomendada (no borrar equipos al cambiar pool)
-// IMPORTANTE: No incluye errores de sintaxis.
-
+// teams.js — Equipos A/B con UX + evento op:teamsChanged + Promedios visibles
 (function () {
   const KEY_PLAYERS = "op_players_v1";
   const KEY_POOL = "op_pool_v1";
@@ -14,12 +12,16 @@
   const loadJSON = (k, fb) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fb; } catch { return fb; } };
   const saveJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
+  function emitTeamsChanged() {
+    try { window.dispatchEvent(new CustomEvent("op:teamsChanged")); } catch {}
+  }
+
   function getPlayers() { return loadJSON(KEY_PLAYERS, []); }
   function getPool() { return new Set(loadJSON(KEY_POOL, [])); }
   function getTeamA() { return new Set(loadJSON(KEY_TEAM_A, [])); }
   function getTeamB() { return new Set(loadJSON(KEY_TEAM_B, [])); }
-  function setTeamA(s) { saveJSON(KEY_TEAM_A, [...s]); }
-  function setTeamB(s) { saveJSON(KEY_TEAM_B, [...s]); }
+  function setTeamA(s) { saveJSON(KEY_TEAM_A, [...s]); emitTeamsChanged(); }
+  function setTeamB(s) { saveJSON(KEY_TEAM_B, [...s]); emitTeamsChanged(); }
   function setPool(s) { saveJSON(KEY_POOL, [...s]); }
 
   function getTotalPlayers() {
@@ -35,8 +37,8 @@
   function countSide(ids, players, side) {
     return listFromIds(ids, players).filter(p => p.side === side).length;
   }
-  function avg(set, poolArr) {
-    const arr = [...set].map(id => poolArr.find(p => p.id === id)).filter(Boolean);
+  function avgTeam(idsSet, players) {
+    const arr = listFromIds(idsSet, players);
     if (!arr.length) return 0;
     return arr.reduce((s,p)=>s+p.rating,0) / arr.length;
   }
@@ -52,17 +54,18 @@
     A = clean(A);
     B = clean(B);
 
-    // no duplicar A/B
     for (const id of A) B.delete(id);
 
-    // Pool manda SOLO si no estamos en modo "dirty"
     if (applyPoolDominates) {
       for (const id of pool) { A.delete(id); B.delete(id); }
     }
 
     if (pool.size > total) pool = new Set([...pool].slice(0, total));
 
-    setPool(pool); setTeamA(A); setTeamB(B);
+    setPool(pool);
+    saveJSON(KEY_TEAM_A, [...A]);
+    saveJSON(KEY_TEAM_B, [...B]);
+
     return { pool, A, B };
   }
 
@@ -81,7 +84,6 @@
     }
 
     const A = new Set(), B = new Set();
-
     const seeds = [Ds.shift(), Rs.shift(), Ds.shift(), Rs.shift()].filter(Boolean);
     let sumA = 0, sumB = 0;
     for (const p of seeds) {
@@ -104,16 +106,23 @@
       return true;
     }
 
+    // greedy por promedio
     const rest = [...Ds, ...Rs].sort((a,b)=>b.rating-a.rating);
+    const avg = (set) => {
+      const arr = [...set].map(id => pool.find(x=>x.id===id)).filter(Boolean);
+      if (!arr.length) return 0;
+      return arr.reduce((s,p)=>s+p.rating,0)/arr.length;
+    };
+
     for (const p of rest) {
-      const first = avg(A,pool) <= avg(B,pool) ? A : B;
+      const first = avg(A) <= avg(B) ? A : B;
       const second = first === A ? B : A;
       if (canAdd(first,p)) first.add(p.id);
       else if (canAdd(second,p)) second.add(p.id);
       else return { ok:false, msg:"No se pudo balancear." };
     }
 
-    return { ok:true, A, B, msg:`✅ Autoarmado OK • N=${total} • Promedios A=${avg(A,pool).toFixed(2)} B=${avg(B,pool).toFixed(2)}` };
+    return { ok:true, A, B, msg:`✅ Autoarmado OK • Prom A=${avg(A).toFixed(2)} B=${avg(B).toFixed(2)}` };
   }
 
   function render() {
@@ -141,6 +150,9 @@
     const aD = countSide(A, players, "D"), aR = countSide(A, players, "R");
     const bD = countSide(B, players, "D"), bR = countSide(B, players, "R");
 
+    const avgA = avgTeam(A, players);
+    const avgB = avgTeam(B, players);
+
     const inTeams = new Set([...A, ...B]);
 
     mount.innerHTML = `
@@ -152,8 +164,7 @@
 
         ${poolDirty ? `
           <div class="hint warn" style="margin-top:10px;">
-            ⚠️ Cambiaste el pool en Base mientras ya había equipos armados.<br/>
-            Si quieres aplicar el pool nuevo, reinicia equipos.
+            ⚠️ Cambiaste el pool en Base mientras ya había equipos armados.
             <div class="btns" style="margin-top:8px;">
               <button class="primary" id="applyPoolBtn">Reiniciar equipos y aplicar pool</button>
               <button class="ghost" id="keepTeamsBtn">Mantener equipos</button>
@@ -174,11 +185,15 @@
           <div id="poolList" style="display:grid; gap:8px;"></div>
         </div>
         <div class="card">
-          <h3 style="margin:0 0 10px;">Equipo A (${aArr.length}/${size}) • D:${aD}/${need} R:${aR}/${need}</h3>
+          <h3 style="margin:0 0 10px;">
+            Equipo A (${aArr.length}/${size}) • D:${aD}/${need} R:${aR}/${need} • Prom: ${avgA ? avgA.toFixed(2) : "—"}
+          </h3>
           <div id="aList" style="display:grid; gap:8px;"></div>
         </div>
         <div class="card">
-          <h3 style="margin:0 0 10px;">Equipo B (${bArr.length}/${size}) • D:${bD}/${need} R:${bR}/${need}</h3>
+          <h3 style="margin:0 0 10px;">
+            Equipo B (${bArr.length}/${size}) • D:${bD}/${need} R:${bR}/${need} • Prom: ${avgB ? avgB.toFixed(2) : "—"}
+          </h3>
           <div id="bList" style="display:grid; gap:8px;"></div>
         </div>
       </div>
@@ -232,13 +247,15 @@
     const applyBtn = $("applyPoolBtn");
     if (applyBtn) {
       applyBtn.addEventListener("click", () => {
-        setTeamA(new Set());
-        setTeamB(new Set());
+        saveJSON(KEY_TEAM_A, []);
+        saveJSON(KEY_TEAM_B, []);
+        emitTeamsChanged();
         poolDirty = false;
         setStatus("Equipos reiniciados. Pool aplicado.", "ok");
         render();
       });
     }
+
     const keepBtn = $("keepTeamsBtn");
     if (keepBtn) {
       keepBtn.addEventListener("click", () => {
@@ -274,7 +291,10 @@
           pool2.add(id);
         }
 
-        ({ pool: pool2, A: A2, B: B2 } = normalize(players, pool2, A2, B2, true));
+        saveJSON(KEY_POOL, [...pool2]);
+        saveJSON(KEY_TEAM_A, [...A2]);
+        saveJSON(KEY_TEAM_B, [...B2]);
+        emitTeamsChanged();
         render();
       });
     });
@@ -282,8 +302,9 @@
     $("clearBtn").addEventListener("click", () => {
       const pool2 = new Set([...getPool(), ...getTeamA(), ...getTeamB()]);
       setPool(pool2);
-      setTeamA(new Set());
-      setTeamB(new Set());
+      saveJSON(KEY_TEAM_A, []);
+      saveJSON(KEY_TEAM_B, []);
+      emitTeamsChanged();
       poolDirty = false;
       setStatus("Equipos limpiados (devueltos al pool).", "ok");
       render();
@@ -294,10 +315,11 @@
       const res = autoBuild(players, getPool());
       if (!res.ok) return setStatus(res.msg, "error");
 
-      setTeamA(res.A);
-      setTeamB(res.B);
-      setPool(new Set());
+      saveJSON(KEY_TEAM_A, [...res.A]);
+      saveJSON(KEY_TEAM_B, [...res.B]);
+      emitTeamsChanged();
 
+      setPool(new Set());
       setStatus(res.msg, "ok");
       render();
     });
