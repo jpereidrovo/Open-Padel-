@@ -1,13 +1,12 @@
-// app.js (module) — modo diagnóstico robusto: NUNCA se cae por imports
+// app.js (module) — navegación + estado de login Supabase
 
-async function safeImport(path) {
-  try {
-    await import(path);
-    console.log("✅ import OK:", path);
-  } catch (e) {
-    console.error("❌ import FAIL:", path, e);
-  }
-}
+import { signInWithGoogle, signOut, getSession } from "./supabaseApi.js";
+
+// Cargar módulos existentes (se ejecutan como antes)
+import "./db.js";
+import "./teams.js";
+import "./turns.js";
+import "./history.js";
 
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -46,40 +45,70 @@ async function safeImport(path) {
     if (typeof window.OP.refresh === "function") window.OP.refresh(view);
   }
 
-  document.addEventListener("DOMContentLoaded", async () => {
-    console.log("✅ DOM listo, app.js ejecutando");
-
-    // Prueba visual: cambia texto del botón
+  async function refreshAuthUI() {
+    const status = $("authStatus");
     const loginBtn = $("loginGoogle");
-    if (loginBtn) loginBtn.textContent = "Login listo ✅ (haz click)";
+    const logoutBtn = $("logoutGoogle");
 
-    // Conecta navegación
+    if (!status || !loginBtn || !logoutBtn) return;
+
+    status.textContent = "Cargando sesión…";
+    status.className = "hint muted";
+
+    try {
+      const session = await getSession();
+
+      if (session?.user) {
+        const email = session.user.email || "usuario";
+        status.textContent = `✅ Conectado: ${email}`;
+        status.className = "hint ok";
+        loginBtn.style.display = "none";
+        logoutBtn.style.display = "";
+        // Avisamos a los módulos que ya hay sesión (para cargar data en supabase luego)
+        window.dispatchEvent(new CustomEvent("op:authChanged", { detail: { session } }));
+      } else {
+        status.textContent = "No has iniciado sesión.";
+        status.className = "hint muted";
+        loginBtn.style.display = "";
+        logoutBtn.style.display = "none";
+        window.dispatchEvent(new CustomEvent("op:authChanged", { detail: { session: null } }));
+      }
+    } catch (e) {
+      console.error(e);
+      status.textContent = "Error de sesión. Reintenta.";
+      status.className = "hint error";
+      loginBtn.style.display = "";
+      logoutBtn.style.display = "none";
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
     $("navBase")?.addEventListener("click", () => show("base"));
     $("navTeams")?.addEventListener("click", () => show("teams"));
     $("navTurns")?.addEventListener("click", () => show("turns"));
     $("navHistory")?.addEventListener("click", () => show("history"));
 
-    // Conecta click del login (primero prueba simple)
     $("loginGoogle")?.addEventListener("click", async () => {
-      alert("Click detectado ✅ Ahora intento abrir Google...");
       try {
-        const mod = await import("./supabaseApi.js");
-        await mod.signInWithGoogle();
+        await signInWithGoogle();
       } catch (e) {
-        console.error("❌ Error en signInWithGoogle()", e);
-        alert("Error al iniciar sesión. Abre consola (F12) y mira el error rojo.");
+        console.error("Login error:", e);
+        alert("No se pudo iniciar sesión. Revisa consola.");
       }
     });
 
-    // Importa el resto sin bloquear (si algo falla, igual funciona el login)
-    await safeImport("./db.js");
-    await safeImport("./teams.js");
-    await safeImport("./turns.js");
-    await safeImport("./history.js");
+    $("logoutGoogle")?.addEventListener("click", async () => {
+      await signOut();
+      await refreshAuthUI();
+    });
 
     show("base");
+    refreshAuthUI();
   });
 
   window.OP = window.OP || {};
   window.OP.show = show;
+
+  // Por si vuelves de OAuth y la sesión cambia
+  window.addEventListener("focus", refreshAuthUI);
 })();
