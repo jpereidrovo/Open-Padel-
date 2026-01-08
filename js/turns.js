@@ -1,13 +1,28 @@
-// turns.js — Turnos A vs B + marcador 2 dígitos + Resultados + Snapshot para Historial
+// turns.js — Turnos + marcador 2 dígitos + Guardar resultados a Historial SOLO si todo está completo
 (function () {
   const KEY_PLAYERS = "op_players_v1";
   const KEY_TOTAL = "op_totalPlayers_v1";
   const KEY_TEAM_A = "op_teamA_v1";
   const KEY_TEAM_B = "op_teamB_v1";
+  const KEY_SESSION_DATE = "op_sessionDate_v1";
+  const KEY_HISTORY = "op_history_v2";
 
   const $ = (id) => document.getElementById(id);
   const loadJSON = (k, fb) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fb; } catch { return fb; } };
+  const saveJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+
   const ALLOWED_TOTALS = [4, 8, 12, 16, 20, 24];
+
+  function todayISO() {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  function getSessionDate() {
+    return localStorage.getItem(KEY_SESSION_DATE) || todayISO();
+  }
 
   function getPlayers() { return loadJSON(KEY_PLAYERS, []); }
   function getTeamA() { return new Set(loadJSON(KEY_TEAM_A, [])); }
@@ -16,7 +31,6 @@
     const v = Number(localStorage.getItem(KEY_TOTAL) || 16);
     return ALLOWED_TOTALS.includes(v) ? v : 16;
   }
-
   function listFromIds(ids, players) {
     return [...ids].map(id => players.find(p => p.id === id)).filter(Boolean);
   }
@@ -29,7 +43,6 @@
     }
     return a;
   }
-
   function pairKey(dId, rId) { return `${dId}|${rId}`; }
 
   function buildPairs(Ds, Rs, usedPairs, maxTries = 4000) {
@@ -94,12 +107,58 @@
         if (w === "Equipo A") { turnA += weight; totalA += weight; }
         if (w === "Equipo B") { turnB += weight; totalB += weight; }
       }
-
       perTurn.push({ turn: ti + 1, weight, A: turnA, B: turnB });
     }
 
     const winner = totalA === totalB ? "Empate" : (totalA > totalB ? "Equipo A" : "Equipo B");
     return { perTurn, totalA, totalB, winner };
+  }
+
+  function allScoresComplete(courts) {
+    if (!lastState) return false;
+    for (let ti = 0; ti < lastState.turns.length; ti++) {
+      for (let mi = 0; mi < courts; mi++) {
+        const key = `${ti}-${mi}`;
+        const raw = lastState.scores[key] || "";
+        if (raw.length !== 2) return false;
+      }
+    }
+    return true;
+  }
+
+  function snapshotTeams(players) {
+    const A = listFromIds(getTeamA(), players).map(p => ({ id: p.id, name: p.name, side: p.side, rating: p.rating }));
+    const B = listFromIds(getTeamB(), players).map(p => ({ id: p.id, name: p.name, side: p.side, rating: p.rating }));
+    return { A, B };
+  }
+
+  function upsertHistoryTurns(dateISO, totalPlayers, teamsSnap, turnsSnap) {
+    const hist = loadJSON(KEY_HISTORY, []);
+    const idx = hist.findIndex(x => x.date === dateISO);
+
+    const nowISO = new Date().toISOString();
+
+    if (idx >= 0) {
+      hist[idx] = {
+        ...hist[idx],
+        date: dateISO,
+        totalPlayers,
+        teams: hist[idx].teams || teamsSnap,
+        turns: turnsSnap,
+        updatedAt: nowISO,
+        createdAt: hist[idx].createdAt || nowISO,
+      };
+    } else {
+      hist.unshift({
+        date: dateISO,
+        totalPlayers,
+        teams: teamsSnap,
+        turns: turnsSnap,
+        createdAt: nowISO,
+        updatedAt: nowISO,
+      });
+    }
+    saveJSON(KEY_HISTORY, hist);
   }
 
   function renderTurns() {
@@ -128,9 +187,11 @@
       if (bD !== perSide || bR !== perSide) err.push(`Equipo B debe tener ${perSide}D y ${perSide}R.`);
     }
 
+    const dateISO = getSessionDate();
+
     mount.innerHTML = `
       <div class="card" style="margin-top:10px;">
-        <div class="hint muted">Turnos: ${courts} canchas por turno • Parejas 1D+1R • A vs B</div>
+        <div class="hint muted">Turnos: ${courts} canchas por turno • Parejas 1D+1R • A vs B • Fecha: <b>${dateISO}</b></div>
 
         <div id="turnsStatus" class="hint" style="margin-top:10px;"></div>
 
@@ -151,6 +212,7 @@
           <div class="btns">
             <button class="primary" id="genTurns" ${err.length ? "disabled":""}>Generar</button>
             <button class="ghost" id="regenTurns" disabled>Otra opción</button>
+            <button class="ghost" id="saveTurns" disabled>Guardar resultados</button>
           </div>
         </div>
       </div>
@@ -168,6 +230,7 @@
     const status = $("turnsStatus");
     const btnRegen = $("regenTurns");
     const btnGen = $("genTurns");
+    const btnSave = $("saveTurns");
 
     function setStatus(msg, kind) {
       status.textContent = msg;
@@ -178,7 +241,7 @@
     else setStatus(`Listo para generar • Equipos completos • A=${A.length} B=${B.length}`, "ok");
 
     function renderResults() {
-      if (!lastState) { resultsOut.innerHTML = ""; return; }
+      if (!lastState) { resultsOut.innerHTML = ""; btnSave.disabled = true; return; }
 
       const summary = computeSummary(players);
       const perTurn = summary.perTurn;
@@ -191,37 +254,6 @@
           <td style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.08); font-weight:900;">${t.B}</td>
         </tr>
       `).join("");
-
-      const turnBlocks = lastState.turns.map((turn, ti) => {
-        const weight = ti + 1;
-        const rows = turn.matches.map((m, mi) => {
-          const key = `${ti}-${mi}`;
-          const raw = lastState.scores[key] || "";
-          const w = scoreWinner(raw);
-          return `
-            <div style="display:grid; grid-template-columns: 70px 1fr 80px 130px; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid rgba(255,255,255,.08);">
-              <div class="pill">Cancha ${mi+1}</div>
-              <div class="hint muted"><b>A:</b> ${namePair(m.A, players)} vs <b>B:</b> ${namePair(m.B, players)}</div>
-              <div style="font-weight:900; text-align:center;">${raw.length===2 ? `${raw[0]}-${raw[1]}` : "—"}</div>
-              <div class="hint">${w ? `Gana ${w} (+${weight})` : "—"}</div>
-            </div>
-          `;
-        }).join("");
-
-        const tRow = perTurn.find(x => x.turn === ti+1);
-        return `
-          <div class="card" style="background: rgba(0,0,0,.18);">
-            <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
-              <h3 style="margin:0;">Turno ${ti+1}</h3>
-              <div class="pill">Valor: ${weight}</div>
-            </div>
-            <div style="margin-top:10px;">${rows}</div>
-            <div style="margin-top:10px; font-weight:900;">
-              Subtotal Turno ${ti+1}: A <b>${tRow.A}</b> • B <b>${tRow.B}</b>
-            </div>
-          </div>
-        `;
-      }).join("");
 
       resultsOut.innerHTML = `
         <div class="card" style="margin-bottom:12px;">
@@ -252,11 +284,14 @@
             </table>
           </div>
         </div>
-
-        <div style="display:grid; gap:12px;">
-          ${turnBlocks}
-        </div>
       `;
+
+      btnSave.disabled = !allScoresComplete(courts);
+      if (!btnSave.disabled) {
+        btnSave.textContent = `Guardar resultados (${dateISO})`;
+      } else {
+        btnSave.textContent = "Guardar resultados";
+      }
     }
 
     function renderAll() {
@@ -330,10 +365,10 @@
       const Aplayers = listFromIds(getTeamA(), players);
       const Bplayers = listFromIds(getTeamB(), players);
 
-      const AD = Aplayers.filter(p=>p.side==="D");
-      const AR = Aplayers.filter(p=>p.side==="R");
-      const BD = Bplayers.filter(p=>p.side==="D");
-      const BR = Bplayers.filter(p=>p.side==="R");
+      const AD = Aplayers.filter(p => p.side === "D");
+      const AR = Aplayers.filter(p => p.side === "R");
+      const BD = Bplayers.filter(p => p.side === "D");
+      const BR = Bplayers.filter(p => p.side === "R");
 
       const usedA = new Set();
       const usedB = new Set();
@@ -344,7 +379,7 @@
         const pairsB = buildPairs(BD, BR, avoidRepeats ? usedB : new Set(), 4000);
 
         if (!pairsA || !pairsB) {
-          return { ok:false, msg:`No pude generar Turno ${t+1} sin repetir parejas. Desactiva “No repetir parejas” o reduce turnos.` };
+          return { ok: false, msg: `No pude generar Turno ${t + 1} sin repetir parejas. Desactiva “No repetir parejas” o reduce turnos.` };
         }
 
         if (avoidRepeats) {
@@ -359,7 +394,7 @@
         turns.push({ matches });
       }
 
-      return { ok:true, turns };
+      return { ok: true, turns };
     }
 
     btnGen?.addEventListener("click", () => {
@@ -372,15 +407,16 @@
         turnsOut.innerHTML = "";
         resultsOut.innerHTML = "";
         btnRegen.disabled = true;
-        status.textContent = res.msg;
-        status.className = "hint error";
+        btnSave.disabled = true;
+        setStatus(res.msg, "error");
         return;
       }
 
       lastState = { turns: res.turns, scores: {} };
       btnRegen.disabled = false;
-      status.textContent = "✅ Turnos generados. Ingresa marcadores para ver resultados.";
-      status.className = "hint ok";
+      btnSave.disabled = true;
+
+      setStatus("✅ Turnos generados. Ingresa todos los marcadores para poder guardar.", "ok");
       renderAll();
     });
 
@@ -388,17 +424,30 @@
       if (btnGen && !btnGen.disabled) btnGen.click();
     });
 
-    // EXPOSE SNAPSHOT para Equipos/Historial
-    window.OP = window.OP || {};
-    window.OP.getTurnsSnapshot = () => {
-      if (!lastState) return null;
-      const summary = computeSummary(getPlayers());
-      return {
+    // Guardar resultados (solo si completo)
+    btnSave?.addEventListener("click", () => {
+      if (!lastState) return;
+
+      if (!allScoresComplete(courts)) {
+        setStatus("❌ Faltan marcadores. Completa todos los partidos para guardar.", "warn");
+        return;
+      }
+
+      const teamsSnap = snapshotTeams(players);
+      const summary = computeSummary(players);
+
+      // Guardamos solo lo necesario: matches + scores + summary
+      const turnsSnap = {
+        turnsCount: lastState.turns.length,
+        courts,
         turns: lastState.turns,
         scores: lastState.scores,
         summary
       };
-    };
+
+      upsertHistoryTurns(dateISO, getTotalPlayers(), teamsSnap, turnsSnap);
+      setStatus(`✅ Resultados guardados en Historial (${dateISO}).`, "ok");
+    });
   }
 
   window.addEventListener("op:poolChanged", () => renderTurns());
