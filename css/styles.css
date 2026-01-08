@@ -1,22 +1,300 @@
-/* Open Padel – estilos base (PASO 2) */
+/* Open Padel – UI (mejorada, modular-friendly) */
 
-:root {
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+:root{
+  --bg: #0b1020;
+  --panel: rgba(255,255,255,.06);
+  --panel2: rgba(0,0,0,.18);
+  --border: rgba(255,255,255,.12);
+  --border2: rgba(255,255,255,.08);
+  --text: #eef2ff;
+  --muted: rgba(238,242,255,.72);
+  --muted2: rgba(238,242,255,.55);
+
+  --primary: #6d5cff;
+  --primary2: #5b4cff;
+
+  --ok: #22c55e;
+  --warn: #fbbf24;
+  --err: #ef4444;
+
+  --shadow: 0 10px 28px rgba(0,0,0,.35);
+  --radius: 16px;
 }
 
-body {
+*{ box-sizing:border-box; }
+html, body { height:100%; }
+
+body{
+  margin:0;
+  background: radial-gradient(1200px 600px at 20% 10%, rgba(109,92,255,.18), transparent 60%),
+              radial-gradient(900px 500px at 85% 30%, rgba(34,197,94,.10), transparent 60%),
+              var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  letter-spacing: .2px;
+}
+
+h1{
   margin: 0;
-  background: #0b1020;
-  color: #eef2ff;
+  padding: 18px 0 12px;
+  font-size: 22px;
+  font-weight: 900;
 }
 
-h1 {
-  padding: 20px;
+h2{
+  margin: 0;
+  font-size: 18px;
+  font-weight: 900;
 }
 
-.card {
-  background: rgba(255,255,255,.06);
-  border: 1px solid rgba(255,255,255,.12);
+h3{
+  font-size: 16px;
+  font-weight: 900;
+}
+
+label{
+  display:block;
+  font-size: 12px;
+  color: var(--muted2);
+  margin-bottom: 6px;
+}
+
+a{ color: inherit; }
+
+.app{
+  display:grid;
+  grid-template-columns: 270px 1fr;
+  min-height: 100vh;
+}
+
+/* Sidebar */
+.sidebar{
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  padding: 16px;
+  border-right: 1px solid var(--border2);
+  background: rgba(0,0,0,.18);
+  backdrop-filter: blur(10px);
+}
+
+.sidebar h2{
+  padding: 10px 10px 14px;
+  border-bottom: 1px solid var(--border2);
+  margin-bottom: 12px;
+}
+
+.sidebar nav{
+  display:grid;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.nav-btn{
+  display:flex;
+  justify-content: space-between;
+  align-items:center;
+  gap: 10px;
+  width:100%;
+  border: 1px solid var(--border2);
+  background: rgba(255,255,255,.04);
+  color: var(--text);
   border-radius: 14px;
+  padding: 10px 12px;
+  font-weight: 800;
+  cursor:pointer;
+  transition: transform .06s ease, background .15s ease, border-color .15s ease;
+}
+
+.nav-btn:hover{
+  background: rgba(255,255,255,.07);
+  border-color: rgba(255,255,255,.14);
+}
+
+.nav-btn:active{ transform: translateY(1px); }
+
+.nav-btn.active{
+  background: rgba(109,92,255,.18);
+  border-color: rgba(109,92,255,.45);
+}
+
+.sidebar-footer{
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border2);
+}
+
+/* Content */
+.content{
+  padding: 16px 18px 24px;
+}
+
+/* Cards */
+.card{
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   padding: 14px;
+  box-shadow: var(--shadow);
+}
+
+.card .card{
+  box-shadow: none;
+}
+
+/* Buttons */
+.btns{
+  display:flex;
+  gap: 10px;
+  align-items:center;
+  flex-wrap: wrap;
+}
+
+button{
+  font-family: inherit;
+}
+
+button.primary{
+  background: linear-gradient(180deg, var(--primary), var(--primary2));
+  border: 1px solid rgba(255,255,255,.18);
+  color: #fff;
+  font-weight: 900;
+  border-radius: 14px;
+  padding: 10px 12px;
+  cursor:pointer;
+  box-shadow: 0 12px 20px rgba(109,92,255,.18);
+  transition: transform .06s ease, filter .15s ease, opacity .15s ease;
+}
+
+button.primary:hover{ filter: brightness(1.05); }
+button.primary:active{ transform: translateY(1px); }
+
+button.ghost{
+  background: rgba(255,255,255,.05);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  font-weight: 800;
+  border-radius: 14px;
+  padding: 10px 12px;
+  cursor:pointer;
+  transition: transform .06s ease, background .15s ease, border-color .15s ease;
+}
+
+button.ghost:hover{
+  background: rgba(255,255,255,.08);
+  border-color: rgba(255,255,255,.14);
+}
+button.ghost:active{ transform: translateY(1px); }
+
+button.small{
+  padding: 8px 10px;
+  border-radius: 12px;
+  font-weight: 900;
+  font-size: 12px;
+}
+
+button:disabled{
+  opacity: .45;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* Inputs */
+input, select{
+  width: 100%;
+  background: rgba(0,0,0,.24);
+  color: var(--text);
+  border: 1px solid var(--border2);
+  border-radius: 14px;
+  padding: 10px 12px;
+  outline: none;
+  transition: border-color .15s ease, background .15s ease;
+}
+
+input:focus, select:focus{
+  border-color: rgba(109,92,255,.55);
+  background: rgba(0,0,0,.30);
+}
+
+input[type="checkbox"]{
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+
+/* Badges / Pills / Hints */
+.badge{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width: 28px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.08);
+  border: 1px solid var(--border2);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.pill{
+  display:inline-flex;
+  gap: 6px;
+  align-items:center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  font-weight: 900;
+  font-size: 12px;
+}
+
+.hint{
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.hint.muted{ color: var(--muted2); }
+.hint.ok{ color: rgba(34,197,94,.95); }
+.hint.warn{ color: rgba(251,191,36,.95); }
+.hint.error{ color: rgba(239,68,68,.95); }
+
+/* Table */
+table{
+  width:100%;
+  border-collapse: collapse;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+thead th{
+  text-align:left;
+  font-size: 12px;
+  color: var(--muted2);
+  padding: 10px;
+  border-bottom: 1px solid var(--border2);
+  background: rgba(0,0,0,.20);
+}
+
+tbody td{
+  padding: 10px;
+  border-bottom: 1px solid var(--border2);
+}
+
+tbody tr:hover{
+  background: rgba(255,255,255,.03);
+}
+
+/* Mobile */
+@media (max-width: 920px){
+  .app{ grid-template-columns: 1fr; }
+  .sidebar{
+    position: relative;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border2);
+  }
+  .content{ padding: 12px; }
 }
