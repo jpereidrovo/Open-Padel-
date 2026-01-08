@@ -1,3 +1,4 @@
+alert("app.js cargó");
 // app.js (module) — navegación + login Google + carga módulos de la app
 
 import { signInWithGoogle } from "./supabaseApi.js";
