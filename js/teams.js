@@ -1,10 +1,12 @@
-// teams.js — Equipos A/B con UX + evento op:teamsChanged + Promedios visibles
+// teams.js — Equipos A/B + fecha editable + botón Grabar a Historial
 (function () {
   const KEY_PLAYERS = "op_players_v1";
   const KEY_POOL = "op_pool_v1";
   const KEY_TOTAL = "op_totalPlayers_v1";
   const KEY_TEAM_A = "op_teamA_v1";
   const KEY_TEAM_B = "op_teamB_v1";
+  const KEY_SESSION_DATE = "op_sessionDate_v1";
+  const KEY_HISTORY = "op_history_v1";
 
   const ALLOWED_TOTALS = [4, 8, 12, 16, 20, 24];
 
@@ -16,12 +18,18 @@
     try { window.dispatchEvent(new CustomEvent("op:teamsChanged")); } catch {}
   }
 
+  function todayISO() {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth()+1).padStart(2,"0");
+    const dd = String(d.getDate()).padStart(2,"0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
   function getPlayers() { return loadJSON(KEY_PLAYERS, []); }
   function getPool() { return new Set(loadJSON(KEY_POOL, [])); }
   function getTeamA() { return new Set(loadJSON(KEY_TEAM_A, [])); }
   function getTeamB() { return new Set(loadJSON(KEY_TEAM_B, [])); }
-  function setTeamA(s) { saveJSON(KEY_TEAM_A, [...s]); emitTeamsChanged(); }
-  function setTeamB(s) { saveJSON(KEY_TEAM_B, [...s]); emitTeamsChanged(); }
   function setPool(s) { saveJSON(KEY_POOL, [...s]); }
 
   function getTotalPlayers() {
@@ -43,31 +51,7 @@
     return arr.reduce((s,p)=>s+p.rating,0) / arr.length;
   }
 
-  let poolDirty = false;
-
-  function normalize(players, pool, A, B, applyPoolDominates) {
-    const total = getTotalPlayers();
-    const valid = new Set(players.map(p => p.id));
-    const clean = (set) => new Set([...set].filter(id => valid.has(id)));
-
-    pool = clean(pool);
-    A = clean(A);
-    B = clean(B);
-
-    for (const id of A) B.delete(id);
-
-    if (applyPoolDominates) {
-      for (const id of pool) { A.delete(id); B.delete(id); }
-    }
-
-    if (pool.size > total) pool = new Set([...pool].slice(0, total));
-
-    setPool(pool);
-    saveJSON(KEY_TEAM_A, [...A]);
-    saveJSON(KEY_TEAM_B, [...B]);
-
-    return { pool, A, B };
-  }
+  function pairKey(dId, rId) { return `${dId}|${rId}`; }
 
   function autoBuild(players, poolSet) {
     const total = getTotalPlayers();
@@ -105,15 +89,13 @@
       if (p.side==="R" && countTeamSide(set,"R") >= need) return false;
       return true;
     }
-
-    // greedy por promedio
-    const rest = [...Ds, ...Rs].sort((a,b)=>b.rating-a.rating);
     const avg = (set) => {
       const arr = [...set].map(id => pool.find(x=>x.id===id)).filter(Boolean);
       if (!arr.length) return 0;
       return arr.reduce((s,p)=>s+p.rating,0)/arr.length;
     };
 
+    const rest = [...Ds, ...Rs].sort((a,b)=>b.rating-a.rating);
     for (const p of rest) {
       const first = avg(A) <= avg(B) ? A : B;
       const second = first === A ? B : A;
@@ -125,6 +107,56 @@
     return { ok:true, A, B, msg:`✅ Autoarmado OK • Prom A=${avg(A).toFixed(2)} B=${avg(B).toFixed(2)}` };
   }
 
+  function normalize(players, pool, A, B) {
+    const total = getTotalPlayers();
+    const valid = new Set(players.map(p => p.id));
+    const clean = (set) => new Set([...set].filter(id => valid.has(id)));
+
+    pool = clean(pool);
+    A = clean(A);
+    B = clean(B);
+
+    for (const id of A) B.delete(id);
+    if (pool.size > total) pool = new Set([...pool].slice(0, total));
+
+    saveJSON(KEY_POOL, [...pool]);
+    saveJSON(KEY_TEAM_A, [...A]);
+    saveJSON(KEY_TEAM_B, [...B]);
+
+    return { pool, A, B };
+  }
+
+  function getSessionDate() {
+    return localStorage.getItem(KEY_SESSION_DATE) || todayISO();
+  }
+  function setSessionDate(v) {
+    localStorage.setItem(KEY_SESSION_DATE, v);
+  }
+
+  function saveToHistory(dateISO, players, Aset, Bset) {
+    const A = listFromIds(Aset, players).map(p => ({ id:p.id, name:p.name, side:p.side, rating:p.rating }));
+    const B = listFromIds(Bset, players).map(p => ({ id:p.id, name:p.name, side:p.side, rating:p.rating }));
+
+    // Tomar snapshot de turnos si existe
+    const turnsSnap = (window.OP && typeof window.OP.getTurnsSnapshot === "function")
+      ? window.OP.getTurnsSnapshot()
+      : null;
+
+    const entry = {
+      id: "h_" + Date.now(),
+      date: dateISO,
+      createdAt: new Date().toISOString(),
+      totalPlayers: getTotalPlayers(),
+      teamA: A,
+      teamB: B,
+      turns: turnsSnap, // incluye turns, scores, summary
+    };
+
+    const hist = loadJSON(KEY_HISTORY, []);
+    hist.unshift(entry);
+    saveJSON(KEY_HISTORY, hist);
+  }
+
   function render() {
     const mount = $("teamsMount");
     if (!mount) return;
@@ -134,10 +166,7 @@
     let A = getTeamA();
     let B = getTeamB();
 
-    const hadTeams = (A.size + B.size) > 0;
-    const applyPoolDominates = !poolDirty;
-
-    ({ pool, A, B } = normalize(players, pool, A, B, applyPoolDominates));
+    ({ pool, A, B } = normalize(players, pool, A, B));
 
     const total = getTotalPlayers();
     const size = teamSize(total);
@@ -155,28 +184,25 @@
 
     const inTeams = new Set([...A, ...B]);
 
+    const sessionDate = getSessionDate();
+
     mount.innerHTML = `
       <div class="card" style="margin-top:10px;">
-        <div class="hint muted">
-          N (desde Base): <b>${total}</b> • Pool objetivo: <b>${total}</b> (D=${total/2}, R=${total/2})<br/>
-          Cada equipo: <b>${size}</b> (D=${need}, R=${need})
-        </div>
-
-        ${poolDirty ? `
-          <div class="hint warn" style="margin-top:10px;">
-            ⚠️ Cambiaste el pool en Base mientras ya había equipos armados.
-            <div class="btns" style="margin-top:8px;">
-              <button class="primary" id="applyPoolBtn">Reiniciar equipos y aplicar pool</button>
-              <button class="ghost" id="keepTeamsBtn">Mantener equipos</button>
+        <div style="display:grid; grid-template-columns: 1fr auto; gap:12px; align-items:end;">
+          <div>
+            <label>Fecha (para grabar)</label>
+            <input id="sessionDate" type="date" value="${sessionDate}">
+            <div class="hint muted" style="margin-top:6px;">
+              N: <b>${total}</b> • Cada equipo: <b>${size}</b> (D=${need}, R=${need})
             </div>
           </div>
-        ` : ``}
-
-        <div class="btns" style="margin-top:10px;">
-          <button class="primary" id="autoBtn" ${poolDirty ? "disabled" : ""}>Autoarmar</button>
-          <button class="ghost" id="clearBtn">Limpiar equipos</button>
+          <div class="btns" style="justify-content:end;">
+            <button class="primary" id="autoBtn">Autoarmar</button>
+            <button class="ghost" id="saveBtn">Grabar</button>
+            <button class="ghost" id="clearBtn">Limpiar equipos</button>
+          </div>
         </div>
-        <div class="hint" id="statusTeams" style="margin-top:8px;"></div>
+        <div class="hint" id="statusTeams" style="margin-top:10px;"></div>
       </div>
 
       <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; margin-top:12px;">
@@ -203,7 +229,6 @@
     const setStatus = (msg, kind) => { st.textContent = msg; st.className = "hint " + (kind || ""); };
 
     function canMoveToTeam(teamSet, p) {
-      if (poolDirty) return false;
       if (teamSet.size >= size) return false;
       const d = countSide(teamSet, players, "D");
       const r = countSide(teamSet, players, "R");
@@ -212,11 +237,11 @@
       return true;
     }
 
-    function cardRow(p, actionsHtml, extra = "") {
+    function cardRow(p, actionsHtml) {
       return `
         <div class="card" style="padding:10px 12px; background: rgba(0,0,0,.18);">
           <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
-            <div><b>${p.name}</b> <span class="pill">${p.side}</span> <span class="pill">${p.rating}</span> ${extra}</div>
+            <div><b>${p.name}</b> <span class="pill">${p.side}</span> <span class="pill">${p.rating}</span></div>
             <div class="btns">${actionsHtml}</div>
           </div>
         </div>
@@ -225,49 +250,32 @@
 
     $("poolList").innerHTML = poolArr.map(p => {
       const already = inTeams.has(p.id);
-      const badge = (poolDirty && already) ? `<span class="pill">en equipo</span>` : ``;
-
       const disA = !canMoveToTeam(A, p) || already;
       const disB = !canMoveToTeam(B, p) || already;
 
       return cardRow(p, `
         <button class="ghost small" data-m="A" data-id="${p.id}" ${disA ? "disabled":""}>→ A</button>
         <button class="ghost small" data-m="B" data-id="${p.id}" ${disB ? "disabled":""}>→ B</button>
-      `, badge);
+      `);
     }).join("") || `<div class="hint muted">Vacío</div>`;
 
     $("aList").innerHTML = aArr.map(p => cardRow(p, `
-      <button class="ghost small" data-m="POOL" data-id="${p.id}" ${poolDirty ? "disabled" : ""}>← Pool</button>
+      <button class="ghost small" data-m="POOL" data-id="${p.id}">← Pool</button>
     `)).join("") || `<div class="hint muted">Vacío</div>`;
 
     $("bList").innerHTML = bArr.map(p => cardRow(p, `
-      <button class="ghost small" data-m="POOL" data-id="${p.id}" ${poolDirty ? "disabled" : ""}>← Pool</button>
+      <button class="ghost small" data-m="POOL" data-id="${p.id}">← Pool</button>
     `)).join("") || `<div class="hint muted">Vacío</div>`;
 
-    const applyBtn = $("applyPoolBtn");
-    if (applyBtn) {
-      applyBtn.addEventListener("click", () => {
-        saveJSON(KEY_TEAM_A, []);
-        saveJSON(KEY_TEAM_B, []);
-        emitTeamsChanged();
-        poolDirty = false;
-        setStatus("Equipos reiniciados. Pool aplicado.", "ok");
-        render();
-      });
-    }
+    // fecha editable
+    $("sessionDate").addEventListener("change", (e) => {
+      setSessionDate(e.target.value || todayISO());
+      setStatus("Fecha actualizada.", "ok");
+    });
 
-    const keepBtn = $("keepTeamsBtn");
-    if (keepBtn) {
-      keepBtn.addEventListener("click", () => {
-        poolDirty = false;
-        setStatus("Se mantuvieron equipos.", "warn");
-        render();
-      });
-    }
-
+    // mover jugadores
     mount.querySelectorAll("[data-m]").forEach(btn => {
       btn.addEventListener("click", () => {
-        if (poolDirty) return;
         const id = btn.getAttribute("data-id");
         const move = btn.getAttribute("data-m");
         if (!id || !move) return;
@@ -299,42 +307,47 @@
       });
     });
 
-    $("clearBtn").addEventListener("click", () => {
-      const pool2 = new Set([...getPool(), ...getTeamA(), ...getTeamB()]);
-      setPool(pool2);
-      saveJSON(KEY_TEAM_A, []);
-      saveJSON(KEY_TEAM_B, []);
-      emitTeamsChanged();
-      poolDirty = false;
-      setStatus("Equipos limpiados (devueltos al pool).", "ok");
-      render();
-    });
-
+    // Autoarmar
     $("autoBtn").addEventListener("click", () => {
-      if (poolDirty) return;
       const res = autoBuild(players, getPool());
       if (!res.ok) return setStatus(res.msg, "error");
 
       saveJSON(KEY_TEAM_A, [...res.A]);
       saveJSON(KEY_TEAM_B, [...res.B]);
+      setPool(new Set()); // vacía pool al autoarmar
       emitTeamsChanged();
-
-      setPool(new Set());
       setStatus(res.msg, "ok");
       render();
     });
 
-    if (!hadTeams && poolArr.length > 0 && poolArr.length < total) {
-      setStatus(`Selecciona ${total - poolArr.length} jugadores más en Base.`, "warn");
-    }
-  }
+    // Limpiar equipos
+    $("clearBtn").addEventListener("click", () => {
+      const pool2 = new Set([...getPool(), ...getTeamA(), ...getTeamB()]);
+      saveJSON(KEY_POOL, [...pool2]);
+      saveJSON(KEY_TEAM_A, []);
+      saveJSON(KEY_TEAM_B, []);
+      emitTeamsChanged();
+      setStatus("Equipos limpiados (devueltos al pool).", "ok");
+      render();
+    });
 
-  window.addEventListener("op:poolChanged", () => {
-    const A = getTeamA();
-    const B = getTeamB();
-    if ((A.size + B.size) > 0) poolDirty = true;
-    render();
-  });
+    // Grabar a historial
+    $("saveBtn").addEventListener("click", () => {
+      const date = $("sessionDate").value || todayISO();
+
+      // validación básica
+      if (aArr.length !== size || bArr.length !== size) {
+        return setStatus("No se puede grabar: equipos incompletos.", "warn");
+      }
+      if (aD !== need || aR !== need || bD !== need || bR !== need) {
+        return setStatus("No se puede grabar: equipos no están balanceados D/R.", "warn");
+      }
+
+      setSessionDate(date);
+      saveToHistory(date, players, getTeamA(), getTeamB());
+      setStatus("✅ Grabado en Historial.", "ok");
+    });
+  }
 
   window.OP = window.OP || {};
   const prevRefresh = window.OP.refresh;
@@ -343,5 +356,6 @@
     if (view === "teams") render();
   };
 
+  window.addEventListener("op:poolChanged", () => render());
   document.addEventListener("DOMContentLoaded", render);
 })();
