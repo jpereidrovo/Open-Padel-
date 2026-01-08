@@ -1,4 +1,13 @@
-// app.js — navegación entre vistas (Base, Equipos, Turnos, Historial)
+// app.js (module) — navegación + login Google + carga módulos de la app
+
+import { signInWithGoogle } from "./supabaseApi.js";
+
+// Importa el resto de tu app (para que se ejecuten sus IIFE igual que antes)
+import "./db.js";
+import "./teams.js";
+import "./turns.js";
+import "./history.js";
+
 (function () {
   const $ = (id) => document.getElementById(id);
 
@@ -42,16 +51,13 @@
     $("navTurns")?.addEventListener("click", () => show("turns"));
     $("navHistory")?.addEventListener("click", () => show("history"));
 
+    // Login Google
+    $("loginGoogle")?.addEventListener("click", () => signInWithGoogle());
+
     show("base");
-    console.log("✅ app.js navegación lista");
+    console.log("✅ app.js navegación + módulos listos");
   });
 
   window.OP = window.OP || {};
   window.OP.show = show;
-  import { signInWithGoogle } from "./supabaseApi.js";
-
-document.addEventListener("DOMContentLoaded", () => {
-  const btn = document.getElementById("loginGoogle");
-  if (btn) btn.addEventListener("click", () => signInWithGoogle());
-});
 })();
