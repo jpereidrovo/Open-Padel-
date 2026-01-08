@@ -1,4 +1,4 @@
-// turns.js — Turnos A vs B + marcador 2 dígitos (63) + vista 6-3 + resultados limpios
+// turns.js — Turnos A vs B + marcador 2 dígitos (63) + vista 6-3 SIN perder foco ni saltar scroll
 (function () {
   const KEY_PLAYERS = "op_players_v1";
   const KEY_TOTAL = "op_totalPlayers_v1";
@@ -63,7 +63,7 @@
   }
 
   function fmtScore(raw) {
-    if (!raw || raw.length !== 2) return "";
+    if (!raw || raw.length !== 2) return "—";
     return `${raw[0]}-${raw[1]}`;
   }
 
@@ -73,6 +73,8 @@
     if (a === b) return "";
     return a > b ? "Equipo A" : "Equipo B";
   }
+
+  let lastState = null;
 
   function renderTurns() {
     const mount = $("turnsMount");
@@ -149,8 +151,6 @@
     if (err.length) setStatus("No se puede generar: " + err.join(" | "), "warn");
     else setStatus(`Listo para generar • Equipos completos • A=${A.length} B=${B.length}`, "ok");
 
-    let lastState = null;
-
     function renderResults() {
       if (!lastState) { resultsOut.innerHTML = ""; return; }
 
@@ -175,10 +175,8 @@
           return `
             <div style="display:grid; grid-template-columns: 70px 1fr 80px 110px; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid rgba(255,255,255,.08);">
               <div class="pill">Cancha ${mi+1}</div>
-              <div class="hint muted">
-                <b>A:</b> ${namePair(m.A, players)} &nbsp; vs &nbsp; <b>B:</b> ${namePair(m.B, players)}
-              </div>
-              <div style="font-weight:900; text-align:center;">${fmtScore(raw) || "—"}</div>
+              <div class="hint muted"><b>A:</b> ${namePair(m.A, players)} vs <b>B:</b> ${namePair(m.B, players)}</div>
+              <div style="font-weight:900; text-align:center;">${raw.length===2 ? `${raw[0]}-${raw[1]}` : "—"}</div>
               <div class="hint">${winner ? `Gana ${winner} (+${weight})` : "—"}</div>
             </div>
           `;
@@ -206,18 +204,14 @@
             <h3 style="margin:0;">Resultado general</h3>
             <div class="pill">${winner}</div>
           </div>
-          <div style="margin-top:10px; font-size:18px; font-weight:900;">
-            A: ${totalA} &nbsp; • &nbsp; B: ${totalB}
-          </div>
+          <div style="margin-top:10px; font-size:18px; font-weight:900;">A: ${totalA} • B: ${totalB}</div>
         </div>
-        <div style="display:grid; gap:12px;">
-          ${turnBlocks.join("")}
-        </div>
+        <div style="display:grid; gap:12px;">${turnBlocks.join("")}</div>
       `;
     }
 
     function renderAll() {
-      if (!lastState) return;
+      if (!lastState) { turnsOut.innerHTML = ""; renderResults(); return; }
 
       turnsOut.innerHTML = lastState.turns.map((turn, ti) => {
         return `
@@ -231,7 +225,6 @@
               ${turn.matches.map((m, mi) => {
                 const key = `${ti}-${mi}`;
                 const raw = lastState.scores[key] || "";
-                const visual = fmtScore(raw);
                 const winner = scoreWinner(raw);
 
                 return `
@@ -246,8 +239,6 @@
 
                       <div style="display:grid; gap:6px; justify-items:end;">
                         <label style="margin:0;">Marcador</label>
-
-                        <!-- Input SOLO 2 dígitos: nunca se bloquea el backspace -->
                         <input
                           data-score="${key}"
                           inputmode="numeric"
@@ -256,9 +247,12 @@
                           value="${raw}"
                           style="width:90px; text-align:center; font-weight:900;"
                         />
-
-                        <div style="font-size:18px; font-weight:900;">${visual || "—"}</div>
-                        <div class="hint ${winner ? "ok" : "muted"}">${winner ? `Gana ${winner}` : ""}</div>
+                        <div class="pill" data-visual="${key}" style="font-size:14px; font-weight:900;">
+                          ${fmtScore(raw)}
+                        </div>
+                        <div class="hint ${winner ? "ok" : "muted"}" data-winner="${key}">
+                          ${winner ? `Gana ${winner}` : ""}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -269,14 +263,25 @@
         `;
       }).join("");
 
+      // Importante: ahora NO reconstruimos todo en cada tecla.
       turnsOut.querySelectorAll("input[data-score]").forEach(inp => {
         inp.addEventListener("input", () => {
           let v = (inp.value || "").replace(/\D/g, "");
           v = v.split("").filter(ch => ch >= "0" && ch <= "7").join("").slice(0, 2);
           inp.value = v;
           lastState.scores[inp.dataset.score] = v;
+
+          // Actualizar SOLO visual y ganador (sin rerender total)
+          const visualEl = turnsOut.querySelector(`[data-visual="${inp.dataset.score}"]`);
+          if (visualEl) visualEl.textContent = fmtScore(v);
+          const winnerEl = turnsOut.querySelector(`[data-winner="${inp.dataset.score}"]`);
+          if (winnerEl) {
+            const w = scoreWinner(v);
+            winnerEl.textContent = w ? `Gana ${w}` : "";
+            winnerEl.className = "hint " + (w ? "ok" : "muted");
+          }
+
           renderResults();
-          renderAll(); // refresca visual “6-3” inmediato
         });
       });
 
@@ -294,7 +299,6 @@
 
       const usedA = new Set();
       const usedB = new Set();
-
       const turns = [];
 
       for (let t = 0; t < turnCount; t++) {
@@ -314,7 +318,6 @@
         const aSh = shuffle(pairsA);
         const bSh = shuffle(pairsB);
         for (let c = 0; c < courts; c++) matches.push({ A: aSh[c], B: bSh[c] });
-
         turns.push({ matches });
       }
 
@@ -347,6 +350,8 @@
         if (btnGen && !btnGen.disabled) btnGen.click();
       });
     }
+
+    // si ya había un state anterior (por refresco), se vería aquí. por ahora lo dejamos simple.
   }
 
   window.addEventListener("op:poolChanged", () => renderTurns());
