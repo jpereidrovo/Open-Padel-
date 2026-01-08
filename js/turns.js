@@ -1,4 +1,4 @@
-// turns.js — Turnos A vs B + marcador 2 dígitos (63) + vista 6-3 SIN perder foco ni saltar scroll
+// turns.js — Turnos A vs B + marcador 2 dígitos + Resultados + Snapshot para Historial
 (function () {
   const KEY_PLAYERS = "op_players_v1";
   const KEY_TOTAL = "op_totalPlayers_v1";
@@ -75,6 +75,32 @@
   }
 
   let lastState = null;
+
+  function computeSummary(players) {
+    if (!lastState) return null;
+
+    const perTurn = [];
+    let totalA = 0, totalB = 0;
+
+    for (let ti = 0; ti < lastState.turns.length; ti++) {
+      const weight = ti + 1;
+      const turn = lastState.turns[ti];
+      let turnA = 0, turnB = 0;
+
+      for (let mi = 0; mi < turn.matches.length; mi++) {
+        const key = `${ti}-${mi}`;
+        const raw = lastState.scores[key] || "";
+        const w = scoreWinner(raw);
+        if (w === "Equipo A") { turnA += weight; totalA += weight; }
+        if (w === "Equipo B") { turnB += weight; totalB += weight; }
+      }
+
+      perTurn.push({ turn: ti + 1, weight, A: turnA, B: turnB });
+    }
+
+    const winner = totalA === totalB ? "Empate" : (totalA > totalB ? "Equipo A" : "Equipo B");
+    return { perTurn, totalA, totalB, winner };
+  }
 
   function renderTurns() {
     const mount = $("turnsMount");
@@ -154,59 +180,82 @@
     function renderResults() {
       if (!lastState) { resultsOut.innerHTML = ""; return; }
 
-      const turnBlocks = [];
-      let totalA = 0, totalB = 0;
+      const summary = computeSummary(players);
+      const perTurn = summary.perTurn;
 
-      for (let ti = 0; ti < lastState.turns.length; ti++) {
+      const resumenRows = perTurn.map(t => `
+        <tr>
+          <td style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.08); font-weight:800;">Turno ${t.turn}</td>
+          <td style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.08);">x${t.weight}</td>
+          <td style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.08); font-weight:900;">${t.A}</td>
+          <td style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.08); font-weight:900;">${t.B}</td>
+        </tr>
+      `).join("");
+
+      const turnBlocks = lastState.turns.map((turn, ti) => {
         const weight = ti + 1;
-        const turn = lastState.turns[ti];
-
-        let turnA = 0, turnB = 0;
-
         const rows = turn.matches.map((m, mi) => {
           const key = `${ti}-${mi}`;
           const raw = lastState.scores[key] || "";
-          const winner = scoreWinner(raw);
-          const puntos = winner ? weight : 0;
-
-          if (winner === "Equipo A") { turnA += puntos; totalA += puntos; }
-          if (winner === "Equipo B") { turnB += puntos; totalB += puntos; }
-
+          const w = scoreWinner(raw);
           return `
-            <div style="display:grid; grid-template-columns: 70px 1fr 80px 110px; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid rgba(255,255,255,.08);">
+            <div style="display:grid; grid-template-columns: 70px 1fr 80px 130px; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid rgba(255,255,255,.08);">
               <div class="pill">Cancha ${mi+1}</div>
               <div class="hint muted"><b>A:</b> ${namePair(m.A, players)} vs <b>B:</b> ${namePair(m.B, players)}</div>
               <div style="font-weight:900; text-align:center;">${raw.length===2 ? `${raw[0]}-${raw[1]}` : "—"}</div>
-              <div class="hint">${winner ? `Gana ${winner} (+${weight})` : "—"}</div>
+              <div class="hint">${w ? `Gana ${w} (+${weight})` : "—"}</div>
             </div>
           `;
         }).join("");
 
-        turnBlocks.push(`
+        const tRow = perTurn.find(x => x.turn === ti+1);
+        return `
           <div class="card" style="background: rgba(0,0,0,.18);">
             <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
               <h3 style="margin:0;">Turno ${ti+1}</h3>
               <div class="pill">Valor: ${weight}</div>
             </div>
             <div style="margin-top:10px;">${rows}</div>
-            <div style="margin-top:10px; font-weight:800;">
-              Subtotal Turno ${ti+1}: A <b>${turnA}</b> • B <b>${turnB}</b>
+            <div style="margin-top:10px; font-weight:900;">
+              Subtotal Turno ${ti+1}: A <b>${tRow.A}</b> • B <b>${tRow.B}</b>
             </div>
           </div>
-        `);
-      }
-
-      const winner = totalA === totalB ? "Empate" : (totalA > totalB ? "Gana Equipo A" : "Gana Equipo B");
+        `;
+      }).join("");
 
       resultsOut.innerHTML = `
         <div class="card" style="margin-bottom:12px;">
           <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
-            <h3 style="margin:0;">Resultado general</h3>
-            <div class="pill">${winner}</div>
+            <h3 style="margin:0;">Resumen (suma de turnos)</h3>
+            <div class="pill">${summary.winner === "Empate" ? "Empate" : `Gana ${summary.winner}`}</div>
           </div>
-          <div style="margin-top:10px; font-size:18px; font-weight:900;">A: ${totalA} • B: ${totalB}</div>
+
+          <div style="margin-top:10px; overflow:auto;">
+            <table style="width:100%; border-collapse:collapse;">
+              <thead>
+                <tr>
+                  <th style="text-align:left; padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.12);">Turno</th>
+                  <th style="text-align:left; padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.12);">Valor</th>
+                  <th style="text-align:left; padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.12);">Puntos A</th>
+                  <th style="text-align:left; padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.12);">Puntos B</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${resumenRows}
+                <tr>
+                  <td style="padding:10px 8px; font-weight:900;">TOTAL</td>
+                  <td style="padding:10px 8px; font-weight:900;">—</td>
+                  <td style="padding:10px 8px; font-weight:900; font-size:16px;">${summary.totalA}</td>
+                  <td style="padding:10px 8px; font-weight:900; font-size:16px;">${summary.totalB}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
-        <div style="display:grid; gap:12px;">${turnBlocks.join("")}</div>
+
+        <div style="display:grid; gap:12px;">
+          ${turnBlocks}
+        </div>
       `;
     }
 
@@ -239,20 +288,10 @@
 
                       <div style="display:grid; gap:6px; justify-items:end;">
                         <label style="margin:0;">Marcador</label>
-                        <input
-                          data-score="${key}"
-                          inputmode="numeric"
-                          maxlength="2"
-                          placeholder="63"
-                          value="${raw}"
-                          style="width:90px; text-align:center; font-weight:900;"
-                        />
-                        <div class="pill" data-visual="${key}" style="font-size:14px; font-weight:900;">
-                          ${fmtScore(raw)}
-                        </div>
-                        <div class="hint ${winner ? "ok" : "muted"}" data-winner="${key}">
-                          ${winner ? `Gana ${winner}` : ""}
-                        </div>
+                        <input data-score="${key}" inputmode="numeric" maxlength="2" placeholder="63" value="${raw}"
+                               style="width:90px; text-align:center; font-weight:900;" />
+                        <div class="pill" data-visual="${key}" style="font-size:14px; font-weight:900;">${fmtScore(raw)}</div>
+                        <div class="hint ${winner ? "ok" : "muted"}" data-winner="${key}">${winner ? `Gana ${winner}` : ""}</div>
                       </div>
                     </div>
                   </div>
@@ -263,7 +302,6 @@
         `;
       }).join("");
 
-      // Importante: ahora NO reconstruimos todo en cada tecla.
       turnsOut.querySelectorAll("input[data-score]").forEach(inp => {
         inp.addEventListener("input", () => {
           let v = (inp.value || "").replace(/\D/g, "");
@@ -271,9 +309,9 @@
           inp.value = v;
           lastState.scores[inp.dataset.score] = v;
 
-          // Actualizar SOLO visual y ganador (sin rerender total)
           const visualEl = turnsOut.querySelector(`[data-visual="${inp.dataset.score}"]`);
           if (visualEl) visualEl.textContent = fmtScore(v);
+
           const winnerEl = turnsOut.querySelector(`[data-winner="${inp.dataset.score}"]`);
           if (winnerEl) {
             const w = scoreWinner(v);
@@ -324,34 +362,43 @@
       return { ok:true, turns };
     }
 
-    if (btnGen) {
-      btnGen.addEventListener("click", () => {
-        const turnCount = Number($("turnsCount").value || 3);
-        const avoid = $("avoidPairs").value === "yes";
+    btnGen?.addEventListener("click", () => {
+      const turnCount = Number($("turnsCount").value || 3);
+      const avoid = $("avoidPairs").value === "yes";
 
-        const res = generate(turnCount, avoid);
-        if (!res.ok) {
-          lastState = null;
-          turnsOut.innerHTML = "";
-          resultsOut.innerHTML = "";
-          btnRegen.disabled = true;
-          return setStatus(res.msg, "error");
-        }
+      const res = generate(turnCount, avoid);
+      if (!res.ok) {
+        lastState = null;
+        turnsOut.innerHTML = "";
+        resultsOut.innerHTML = "";
+        btnRegen.disabled = true;
+        status.textContent = res.msg;
+        status.className = "hint error";
+        return;
+      }
 
-        lastState = { turns: res.turns, scores: {} };
-        btnRegen.disabled = false;
-        setStatus("✅ Turnos generados. Ingresa marcadores para ver resultados.", "ok");
-        renderAll();
-      });
-    }
+      lastState = { turns: res.turns, scores: {} };
+      btnRegen.disabled = false;
+      status.textContent = "✅ Turnos generados. Ingresa marcadores para ver resultados.";
+      status.className = "hint ok";
+      renderAll();
+    });
 
-    if (btnRegen) {
-      btnRegen.addEventListener("click", () => {
-        if (btnGen && !btnGen.disabled) btnGen.click();
-      });
-    }
+    btnRegen?.addEventListener("click", () => {
+      if (btnGen && !btnGen.disabled) btnGen.click();
+    });
 
-    // si ya había un state anterior (por refresco), se vería aquí. por ahora lo dejamos simple.
+    // EXPOSE SNAPSHOT para Equipos/Historial
+    window.OP = window.OP || {};
+    window.OP.getTurnsSnapshot = () => {
+      if (!lastState) return null;
+      const summary = computeSummary(getPlayers());
+      return {
+        turns: lastState.turns,
+        scores: lastState.scores,
+        summary
+      };
+    };
   }
 
   window.addEventListener("op:poolChanged", () => renderTurns());
