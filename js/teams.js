@@ -5,6 +5,11 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
   const $ = (id) => document.getElementById(id);
   function esc(s){return String(s||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");}
   function avg(arr){ return arr?.length ? arr.reduce((s,p)=>s+(Number(p.rating)||0),0)/arr.length : 0; }
+  function counts(arr){
+    const d = (arr||[]).filter(p=>p.side==="D").length;
+    const r = (arr||[]).filter(p=>p.side==="R").length;
+    return { d, r };
+  }
 
   function poolPlayers(){
     const set = new Set(Store.state?.pool || []);
@@ -22,26 +27,18 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
 
   function mini(p){ return {id:p.id,name:p.name,side:p.side,rating:p.rating}; }
 
-  // ---------- NUEVO AUTOARMAR (más random pero balanceado) ----------
-  // Idea:
-  // 1) Reves: repartir los 4 mejores en 2 y 2 (pero probando ambas combinaciones para mejor promedio)
-  // 2) Derecha: repartir los 4 mejores en 2 y 2 también, eligiendo la combinación que minimiza diferencia
-  // 3) Resto: se baraja aleatorio y se asigna uno a uno al equipo que tenga menor promedio/suma
-  //    respetando límites de D/R en cada equipo.
-  //
-  // Extra: si niveles de derechas son muy parecidos, mete random en elección.
+  // ---------- AUTOARMAR (random controlado + balanceado) ----------
   function autoBalanceSmart(pool){
     const rights = pool.filter(p=>p.side==="D").slice().sort((a,b)=>b.rating-a.rating);
     const lefts  = pool.filter(p=>p.side==="R").slice().sort((a,b)=>b.rating-a.rating);
 
     const targetSize = pool.length / 2;
-    const targetPerSide = pool.length / 4; // por equipo
+    const targetPerSide = pool.length / 4;
 
     const A=[], B=[];
     const sum = (t)=>t.reduce((s,p)=>s+(p.rating||0),0);
     const countSide = (t,side)=>t.filter(p=>p.side===side).length;
 
-    // helper random
     const rand = () => Math.random();
     const shuffle = (arr) => {
       const a = arr.slice();
@@ -52,36 +49,29 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       return a;
     };
 
-    // toma top4 o lo que haya (normalmente hay >=4 si juegan 16)
     const topL = lefts.slice(0,4);
     const topR = rights.slice(0,4);
 
-    // Reparto top4 en 2 y 2 (dos combinaciones principales):
-    // combo1: A gets [0,2], B gets [1,3]
-    // combo2: A gets [0,3], B gets [1,2]
     function bestSplitTop4(list){
       if (list.length < 4) {
-        // si hay menos, repartir alternando
         const a=[], b=[];
         list.forEach((p,i)=>(i%2===0?a:b).push(p));
         return {a,b};
       }
       const c1a=[list[0],list[2]], c1b=[list[1],list[3]];
       const c2a=[list[0],list[3]], c2b=[list[1],list[2]];
-      // mide diferencia por suma (no promedio) porque tamaños iguales
       const d1 = Math.abs(c1a.reduce((s,p)=>s+p.rating,0) - c1b.reduce((s,p)=>s+p.rating,0));
       const d2 = Math.abs(c2a.reduce((s,p)=>s+p.rating,0) - c2b.reduce((s,p)=>s+p.rating,0));
-      // si iguales, elige random
       if (d1 === d2) return rand() < 0.5 ? {a:c1a,b:c1b} : {a:c2a,b:c2b};
       return d1 < d2 ? {a:c1a,b:c1b} : {a:c2a,b:c2b};
     }
 
-    // 1) repartir top reves
+    // 1) Reves top4 -> 2 y 2
     const splitL = bestSplitTop4(topL);
     splitL.a.forEach(p=>A.push(p));
     splitL.b.forEach(p=>B.push(p));
 
-    // 2) repartir top derechas, pero considerando el estado actual (A/B ya tienen reves)
+    // 2) Derecha top4 -> 2 y 2 pero considerando el estado (A/B ya tiene reves)
     function bestSplitTop4ConsideringState(list){
       if (list.length < 4) {
         const a=[], b=[];
@@ -93,9 +83,8 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
         { a:[list[0],list[3]], b:[list[1],list[2]] }
       ];
 
-      // Si todos los derechos son casi iguales, mete más random:
       const spread = Math.abs((list[0]?.rating||0) - (list[3]?.rating||0));
-      const useRandomBias = spread <= 1; // “no hay diferencia” => random
+      const useRandomBias = spread <= 1;
 
       let best = null;
       let bestDiff = Infinity;
@@ -104,15 +93,10 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
         const aSum = sum(A) + opt.a.reduce((s,p)=>s+p.rating,0);
         const bSum = sum(B) + opt.b.reduce((s,p)=>s+p.rating,0);
         const diff = Math.abs(aSum - bSum);
-        if (diff < bestDiff) {
-          bestDiff = diff;
-          best = opt;
-        } else if (diff === bestDiff && useRandomBias) {
-          // empate -> random
-          if (rand() < 0.5) best = opt;
-        }
+        if (diff < bestDiff) { bestDiff = diff; best = opt; }
+        else if (diff === bestDiff && useRandomBias) { if (rand() < 0.5) best = opt; }
       }
-      // si spread bajo, incluso si hay best, barajar probabilidad
+
       if (useRandomBias && rand() < 0.35) best = options[Math.floor(rand()*options.length)];
       return best;
     }
@@ -124,7 +108,6 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
     const used = new Set([...A,...B].map(p=>p.id));
     const rest = shuffle(pool.filter(p=>!used.has(p.id)));
 
-    // 3) resto: asigna aleatorio pero con “objetivo” balance
     for (const p of rest) {
       if (A.length >= targetSize && B.length >= targetSize) break;
 
@@ -133,21 +116,17 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
 
       if (aOk && !bOk) { A.push(p); continue; }
       if (!aOk && bOk) { B.push(p); continue; }
-
       if (!aOk && !bOk) continue;
 
-      // ambos pueden: elige el que deje menor diferencia, con “random small jitter”
       const aSum = sum(A), bSum = sum(B);
       const diffIfA = Math.abs((aSum + p.rating) - bSum);
       const diffIfB = Math.abs(aSum - (bSum + p.rating));
 
-      // jitter para variar resultados
-      const jitter = (rand() - 0.5) * 0.2; // +/-0.1
+      const jitter = (rand() - 0.5) * 0.2;
       const scoreA = diffIfA + jitter;
       const scoreB = diffIfB - jitter;
 
-      if (scoreA <= scoreB) A.push(p);
-      else B.push(p);
+      (scoreA <= scoreB ? A : B).push(p);
     }
 
     return { A, B };
@@ -156,7 +135,10 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
   function render(){
     const mount = $("teamsMount");
     if (!mount) return;
-    if (!Store.ready){ mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint muted">Inicia sesión para usar Equipos.</div></div>`; return; }
+    if (!Store.ready){
+      mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint muted">Inicia sesión para usar Equipos.</div></div>`;
+      return;
+    }
 
     const s = Store.state || {};
     if (!s.session_date) Store.setState({ session_date: new Date().toISOString().slice(0,10) });
@@ -168,13 +150,19 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
     const B = (s.team_b||[]);
     const avgA = avg(A), avgB = avg(B);
 
+    const cPool = counts(pool);
+    const cA = counts(A);
+    const cB = counts(B);
+
     mount.innerHTML = `
       <div class="card" style="margin-top:10px;">
         <div style="display:flex; gap:10px; justify-content:space-between; flex-wrap:wrap; align-items:end;">
           <div>
             <label>Fecha</label>
             <input id="sessionDate" type="date" value="${esc(Store.state?.session_date)}" />
-            <div class="hint ${val.ok?"ok":"warn"}" style="margin-top:6px;">${val.ok?"✅ Pool válido":("⚠️ "+val.msg)}</div>
+            <div class="hint ${val.ok?"ok":"warn"}" style="margin-top:6px;">
+              ${val.ok ? "✅ Pool válido" : ("⚠️ " + val.msg)}
+            </div>
           </div>
           <div class="btns">
             <button class="ghost" id="clearTeams">Limpiar equipos</button>
@@ -182,8 +170,12 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
             <button class="ghost" id="saveTeams" ${A.length && B.length ? "" : "disabled"}>Guardar equipos</button>
           </div>
         </div>
+
         <div class="hint muted" style="margin-top:10px;">
-          Pool: <b>${pool.length}</b> • Prom A: <b>${avgA.toFixed(2)}</b> • Prom B: <b>${avgB.toFixed(2)}</b> • Δ: <b>${Math.abs(avgA-avgB).toFixed(2)}</b>
+          Pool: <b>${pool.length}</b> (D:${cPool.d} • R:${cPool.r}) •
+          A: Prom <b>${avgA.toFixed(2)}</b> (D:${cA.d} • R:${cA.r}) •
+          B: Prom <b>${avgB.toFixed(2)}</b> (D:${cB.d} • R:${cB.r}) •
+          Δ: <b>${Math.abs(avgA-avgB).toFixed(2)}</b>
         </div>
       </div>
 
@@ -198,10 +190,12 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
           <div class="card" style="background: rgba(0,0,0,.18);">
             <h4 style="margin:0 0 10px;">Equipo A</h4>
+            <div class="hint muted" style="margin-bottom:10px;">D:${cA.d} • R:${cA.r}</div>
             <div id="teamA" style="display:grid; gap:8px;"></div>
           </div>
           <div class="card" style="background: rgba(0,0,0,.18);">
             <h4 style="margin:0 0 10px;">Equipo B</h4>
+            <div class="hint muted" style="margin-bottom:10px;">D:${cB.d} • R:${cB.r}</div>
             <div id="teamB" style="display:grid; gap:8px;"></div>
           </div>
         </div>
@@ -217,7 +211,6 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       Store.setState({ session_date: e.target.value });
     });
 
-    // pool list
     const poolEl = $("poolList");
     if (poolEl){
       poolEl.innerHTML = pool.length ? pool.map(p=>`
