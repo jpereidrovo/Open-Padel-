@@ -1,4 +1,4 @@
-// app.js (module) — navegación + login + inicializa Store Supabase
+// app.js — navegación + login + inicializa Store (sin saltar a Base solo)
 import { signInWithGoogle, signOut, getSession } from "./supabaseApi.js";
 import { Store } from "./store.js";
 
@@ -10,6 +10,8 @@ import "./history.js";
 (function () {
   const $ = (id) => document.getElementById(id);
 
+  let currentView = "base"; // mantiene la vista actual
+
   function setActive(navId) {
     ["navBase", "navTeams", "navTurns", "navHistory"].forEach(id => {
       const el = $(id);
@@ -19,11 +21,15 @@ import "./history.js";
   }
 
   function show(view) {
+    currentView = view;
+
     const map = { base:"viewBase", teams:"viewTeams", turns:"viewTurns", history:"viewHistory" };
     Object.values(map).forEach(id => { const el = $(id); if (el) el.style.display = "none"; });
     const target = $(map[view]);
     if (target) target.style.display = "";
+
     setActive(view==="base"?"navBase":view==="teams"?"navTeams":view==="turns"?"navTurns":"navHistory");
+
     window.OP = window.OP || {};
     if (typeof window.OP.refresh === "function") window.OP.refresh(view);
   }
@@ -33,11 +39,11 @@ import "./history.js";
     const views = ["viewBase","viewTeams","viewTurns","viewHistory"];
     const navs = ["navBase","navTeams","navTurns","navHistory"];
     if (gate) gate.style.display = enabled ? "none" : "";
-    views.forEach(id => { const el=$(id); if (el) el.style.display = enabled ? (id==="viewBase"?"":"none") : "none"; });
+    views.forEach(id => { const el=$(id); if (el) el.style.display = enabled ? "" : "none"; });
     navs.forEach(id => { const el=$(id); if (el) el.disabled = !enabled; });
   }
 
-  async function refreshAuthUI() {
+  async function refreshAuthUI({ preserveView = true } = {}) {
     const status = $("authStatus");
     const loginBtn = $("loginGoogle");
     const logoutBtn = $("logoutGoogle");
@@ -55,15 +61,13 @@ import "./history.js";
         status.className = "hint ok";
         loginBtn.style.display = "none";
         logoutBtn.style.display = "";
-
         setAppEnabled(true);
 
-        // Inicializa Store (carga players + state desde Supabase)
-        if (!Store.ready) {
-          await Store.init();
-        }
+        if (!Store.ready) await Store.init();
 
-        show("base");
+        // ✅ clave: NO forzar base; mantener la vista
+        if (preserveView) show(currentView);
+        else show("base");
       } else {
         status.textContent = "No has iniciado sesión.";
         status.className = "hint muted";
@@ -93,14 +97,17 @@ import "./history.js";
 
     $("logoutGoogle")?.addEventListener("click", async () => {
       await signOut();
-      location.reload(); // simple y limpio
+      location.reload();
     });
 
     setAppEnabled(false);
-    refreshAuthUI();
+    show("base");
+    refreshAuthUI({ preserveView: false });
   });
 
   window.OP = window.OP || {};
   window.OP.show = show;
-  window.addEventListener("focus", refreshAuthUI);
+
+  // cuando vuelves a la pestaña, refresca sesión pero manteniendo vista
+  window.addEventListener("focus", () => refreshAuthUI({ preserveView: true }));
 })();
