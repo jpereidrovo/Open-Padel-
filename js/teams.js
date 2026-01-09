@@ -22,32 +22,135 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
 
   function mini(p){ return {id:p.id,name:p.name,side:p.side,rating:p.rating}; }
 
-  // auto-balance simple + robusto
-  function autoBalance(pool){
-    const D = pool.filter(p=>p.side==="D").sort((a,b)=>b.rating-a.rating);
-    const R = pool.filter(p=>p.side==="R").sort((a,b)=>b.rating-a.rating);
-    const A=[],B=[];
-    if (D[0]) A.push(D[0]); if (D[1]) B.push(D[1]);
-    if (R[0]) A.push(R[0]); if (R[1]) B.push(R[1]);
-    const used = new Set([...A,...B].map(x=>x.id));
-    const rest = pool.filter(p=>!used.has(p.id)).sort((a,b)=>b.rating-a.rating);
+  // ---------- NUEVO AUTOARMAR (más random pero balanceado) ----------
+  // Idea:
+  // 1) Reves: repartir los 4 mejores en 2 y 2 (pero probando ambas combinaciones para mejor promedio)
+  // 2) Derecha: repartir los 4 mejores en 2 y 2 también, eligiendo la combinación que minimiza diferencia
+  // 3) Resto: se baraja aleatorio y se asigna uno a uno al equipo que tenga menor promedio/suma
+  //    respetando límites de D/R en cada equipo.
+  //
+  // Extra: si niveles de derechas son muy parecidos, mete random en elección.
+  function autoBalanceSmart(pool){
+    const rights = pool.filter(p=>p.side==="D").slice().sort((a,b)=>b.rating-a.rating);
+    const lefts  = pool.filter(p=>p.side==="R").slice().sort((a,b)=>b.rating-a.rating);
 
-    const target = pool.length/2;
-    const targetSide = pool.length/4;
+    const targetSize = pool.length / 2;
+    const targetPerSide = pool.length / 4; // por equipo
 
-    const countSide = (t,side)=>t.filter(p=>p.side===side).length;
+    const A=[], B=[];
     const sum = (t)=>t.reduce((s,p)=>s+(p.rating||0),0);
+    const countSide = (t,side)=>t.filter(p=>p.side===side).length;
 
-    for (const p of rest){
-      const aOk = A.length<target && countSide(A,p.side)<targetSide;
-      const bOk = B.length<target && countSide(B,p.side)<targetSide;
-      if (aOk && !bOk){ A.push(p); continue; }
-      if (!aOk && bOk){ B.push(p); continue; }
-      const diffA = Math.abs((sum(A)+p.rating) - sum(B));
-      const diffB = Math.abs(sum(A) - (sum(B)+p.rating));
-      (diffA<=diffB?A:B).push(p);
+    // helper random
+    const rand = () => Math.random();
+    const shuffle = (arr) => {
+      const a = arr.slice();
+      for (let i=a.length-1;i>0;i--){
+        const j = Math.floor(Math.random()*(i+1));
+        [a[i],a[j]] = [a[j],a[i]];
+      }
+      return a;
+    };
+
+    // toma top4 o lo que haya (normalmente hay >=4 si juegan 16)
+    const topL = lefts.slice(0,4);
+    const topR = rights.slice(0,4);
+
+    // Reparto top4 en 2 y 2 (dos combinaciones principales):
+    // combo1: A gets [0,2], B gets [1,3]
+    // combo2: A gets [0,3], B gets [1,2]
+    function bestSplitTop4(list){
+      if (list.length < 4) {
+        // si hay menos, repartir alternando
+        const a=[], b=[];
+        list.forEach((p,i)=>(i%2===0?a:b).push(p));
+        return {a,b};
+      }
+      const c1a=[list[0],list[2]], c1b=[list[1],list[3]];
+      const c2a=[list[0],list[3]], c2b=[list[1],list[2]];
+      // mide diferencia por suma (no promedio) porque tamaños iguales
+      const d1 = Math.abs(c1a.reduce((s,p)=>s+p.rating,0) - c1b.reduce((s,p)=>s+p.rating,0));
+      const d2 = Math.abs(c2a.reduce((s,p)=>s+p.rating,0) - c2b.reduce((s,p)=>s+p.rating,0));
+      // si iguales, elige random
+      if (d1 === d2) return rand() < 0.5 ? {a:c1a,b:c1b} : {a:c2a,b:c2b};
+      return d1 < d2 ? {a:c1a,b:c1b} : {a:c2a,b:c2b};
     }
-    return {A,B};
+
+    // 1) repartir top reves
+    const splitL = bestSplitTop4(topL);
+    splitL.a.forEach(p=>A.push(p));
+    splitL.b.forEach(p=>B.push(p));
+
+    // 2) repartir top derechas, pero considerando el estado actual (A/B ya tienen reves)
+    function bestSplitTop4ConsideringState(list){
+      if (list.length < 4) {
+        const a=[], b=[];
+        list.forEach((p,i)=>(i%2===0?a:b).push(p));
+        return {a,b};
+      }
+      const options = [
+        { a:[list[0],list[2]], b:[list[1],list[3]] },
+        { a:[list[0],list[3]], b:[list[1],list[2]] }
+      ];
+
+      // Si todos los derechos son casi iguales, mete más random:
+      const spread = Math.abs((list[0]?.rating||0) - (list[3]?.rating||0));
+      const useRandomBias = spread <= 1; // “no hay diferencia” => random
+
+      let best = null;
+      let bestDiff = Infinity;
+
+      for (const opt of options) {
+        const aSum = sum(A) + opt.a.reduce((s,p)=>s+p.rating,0);
+        const bSum = sum(B) + opt.b.reduce((s,p)=>s+p.rating,0);
+        const diff = Math.abs(aSum - bSum);
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          best = opt;
+        } else if (diff === bestDiff && useRandomBias) {
+          // empate -> random
+          if (rand() < 0.5) best = opt;
+        }
+      }
+      // si spread bajo, incluso si hay best, barajar probabilidad
+      if (useRandomBias && rand() < 0.35) best = options[Math.floor(rand()*options.length)];
+      return best;
+    }
+
+    const splitR = bestSplitTop4ConsideringState(topR);
+    splitR.a.forEach(p=>A.push(p));
+    splitR.b.forEach(p=>B.push(p));
+
+    const used = new Set([...A,...B].map(p=>p.id));
+    const rest = shuffle(pool.filter(p=>!used.has(p.id)));
+
+    // 3) resto: asigna aleatorio pero con “objetivo” balance
+    for (const p of rest) {
+      if (A.length >= targetSize && B.length >= targetSize) break;
+
+      const aOk = A.length < targetSize && countSide(A,p.side) < targetPerSide;
+      const bOk = B.length < targetSize && countSide(B,p.side) < targetPerSide;
+
+      if (aOk && !bOk) { A.push(p); continue; }
+      if (!aOk && bOk) { B.push(p); continue; }
+
+      if (!aOk && !bOk) continue;
+
+      // ambos pueden: elige el que deje menor diferencia, con “random small jitter”
+      const aSum = sum(A), bSum = sum(B);
+      const diffIfA = Math.abs((aSum + p.rating) - bSum);
+      const diffIfB = Math.abs(aSum - (bSum + p.rating));
+
+      // jitter para variar resultados
+      const jitter = (rand() - 0.5) * 0.2; // +/-0.1
+      const scoreA = diffIfA + jitter;
+      const scoreB = diffIfB - jitter;
+
+      if (scoreA <= scoreB) A.push(p);
+      else B.push(p);
+    }
+
+    return { A, B };
   }
 
   function render(){
@@ -79,7 +182,9 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
             <button class="ghost" id="saveTeams" ${A.length && B.length ? "" : "disabled"}>Guardar equipos</button>
           </div>
         </div>
-        <div class="hint muted" style="margin-top:10px;">Pool: <b>${pool.length}</b> jugadores • Prom A: <b>${avgA.toFixed(2)}</b> • Prom B: <b>${avgB.toFixed(2)}</b> • Δ: <b>${Math.abs(avgA-avgB).toFixed(2)}</b></div>
+        <div class="hint muted" style="margin-top:10px;">
+          Pool: <b>${pool.length}</b> • Prom A: <b>${avgA.toFixed(2)}</b> • Prom B: <b>${avgB.toFixed(2)}</b> • Δ: <b>${Math.abs(avgA-avgB).toFixed(2)}</b>
+        </div>
       </div>
 
       <div class="card" style="margin-top:12px;">
@@ -166,7 +271,7 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
 
     $("autoTeams")?.addEventListener("click", ()=>{
       if (!val.ok) return;
-      const {A:AA,B:BB} = autoBalance(pool);
+      const {A:AA,B:BB} = autoBalanceSmart(pool);
       setTeams(AA,BB);
     });
 
