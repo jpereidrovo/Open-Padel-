@@ -6,7 +6,6 @@ export const GROUP_CODE = "open-padel";
 // ---------------- AUTH ----------------
 export async function signInWithGoogle() {
   const redirectTo = window.location.origin + window.location.pathname;
-
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: { redirectTo }
@@ -45,24 +44,31 @@ export async function listPlayers() {
 }
 
 /**
- * Crea o actualiza un jugador.
- * - Si viene id -> upsert por id
- * - Si NO viene id -> insert (sin enviar id)
+ * upsertPlayer: crea o edita.
+ * IMPORTANTE: tu tabla tiene created_at y updated_at NOT NULL.
+ * Para evitar errores y mantener consistencia, seteamos updated_at siempre.
+ * En insert también enviamos created_at.
  */
 export async function upsertPlayer({ id, name, side, rating }) {
   await requireSession();
 
+  const now = new Date().toISOString();
+
+  // payload base
   const payload = {
     group_code: GROUP_CODE,
     name,
     side,
-    rating
+    rating,
+    updated_at: now
   };
 
-  // ⚠️ clave: solo mandar id si existe
+  // si es nuevo, agregamos created_at (aunque tenga default)
+  if (!id) payload.created_at = now;
+
+  // si viene id, se actualiza ese registro
   if (id) payload.id = id;
 
-  // Si no hay id, esto igual funciona (insert)
   const { data, error } = await supabase
     .from("players")
     .upsert(payload, { onConflict: "id" })
@@ -106,7 +112,6 @@ export async function getState() {
 
   if (error) throw error;
 
-  // Si no existe, creamos estado inicial
   if (!data) {
     const init = {
       group_code: GROUP_CODE,
