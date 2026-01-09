@@ -11,6 +11,16 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
     return { d, r };
   }
 
+  // Persist UI preference (collapse pool)
+  function getUIPref() {
+    try { return JSON.parse(localStorage.getItem("op_ui_teams") || "{}"); }
+    catch { return {}; }
+  }
+  function setUIPref(p) {
+    const cur = getUIPref();
+    localStorage.setItem("op_ui_teams", JSON.stringify({ ...cur, ...p }));
+  }
+
   function poolPlayers(){
     const set = new Set(Store.state?.pool || []);
     return (Store.players||[]).filter(p=>set.has(p.id));
@@ -66,12 +76,12 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       return d1 < d2 ? {a:c1a,b:c1b} : {a:c2a,b:c2b};
     }
 
-    // 1) Reves top4 -> 2 y 2
+    // 1) Top reves 2 y 2
     const splitL = bestSplitTop4(topL);
     splitL.a.forEach(p=>A.push(p));
     splitL.b.forEach(p=>B.push(p));
 
-    // 2) Derecha top4 -> 2 y 2 pero considerando el estado (A/B ya tiene reves)
+    // 2) Top derechas 2 y 2 considerando estado
     function bestSplitTop4ConsideringState(list){
       if (list.length < 4) {
         const a=[], b=[];
@@ -140,6 +150,9 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       return;
     }
 
+    const ui = getUIPref();
+    const poolCollapsed = ui.poolCollapsed ?? true; // default: colapsado
+
     const s = Store.state || {};
     if (!s.session_date) Store.setState({ session_date: new Date().toISOString().slice(0,10) });
 
@@ -180,12 +193,21 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       </div>
 
       <div class="card" style="margin-top:12px;">
-        <h3 style="margin:0 0 10px;">Pool (${pool.length})</h3>
-        <div class="hint muted" style="margin-bottom:10px;">Selecciona el pool en Base. Aquí se ve en vivo.</div>
-        <div id="poolList" style="display:grid; gap:10px;"></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+          <h3 style="margin:0;">Pool (${pool.length})</h3>
+          <div class="btns">
+            <button class="ghost" id="togglePool">${poolCollapsed ? "Mostrar pool" : "Ocultar pool"}</button>
+          </div>
+        </div>
+        <div class="hint muted" style="margin-top:6px;">
+          Tip: usa “Mostrar pool” solo cuando quieras mover jugadores manualmente.
+        </div>
+        <div id="poolBlock" style="margin-top:10px; display:${poolCollapsed ? "none" : "block"};">
+          <div id="poolList" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;"></div>
+        </div>
       </div>
 
-      <div class="card" style="margin-top:12px;">
+      <div class="card" id="teamsSection" style="margin-top:12px;">
         <h3 style="margin:0 0 10px;">Equipos</h3>
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
           <div class="card" style="background: rgba(0,0,0,.18);">
@@ -211,6 +233,12 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       Store.setState({ session_date: e.target.value });
     });
 
+    $("togglePool")?.addEventListener("click", ()=>{
+      setUIPref({ poolCollapsed: !poolCollapsed });
+      render();
+    });
+
+    // pool list
     const poolEl = $("poolList");
     if (poolEl){
       poolEl.innerHTML = pool.length ? pool.map(p=>`
@@ -266,6 +294,11 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       if (!val.ok) return;
       const {A:AA,B:BB} = autoBalanceSmart(pool);
       setTeams(AA,BB);
+
+      // ✅ UX: llevar al usuario directo a los equipos
+      const target = $("teamsSection");
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+      setStatus("✅ Equipos generados. Revisa abajo.", "ok");
     });
 
     $("saveTeams")?.addEventListener("click", async ()=>{
