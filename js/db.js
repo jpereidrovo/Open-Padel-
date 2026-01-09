@@ -14,17 +14,25 @@ import { listPlayers, upsertPlayer, deletePlayer, deleteAllPlayers } from "./sup
     if (b) b.textContent = String(Store.players?.length || 0);
   }
 
-  function poolSet(){ return new Set(Store.state?.pool || []); }
+  function poolIds(){ return (Store.state?.pool || []).slice(); }
+  function poolSet(){ return new Set(poolIds()); }
+
+  function poolCounts(){
+    const set = poolSet();
+    const selected = (Store.players||[]).filter(p=>set.has(p.id));
+    const d = selected.filter(p=>p.side==="D").length;
+    const r = selected.filter(p=>p.side==="R").length;
+    return { total: selected.length, d, r, ok: selected.length%4===0 && d===r };
+  }
 
   function removeEverywhere(pid){
-    const pool = (Store.state?.pool || []).filter(id => id !== pid);
+    const pool = poolIds().filter(id => id !== pid);
     const A = (Store.state?.team_a || []).filter(p => p.id !== pid);
     const B = (Store.state?.team_b || []).filter(p => p.id !== pid);
     Store.setState({ pool, team_a: A, team_b: B });
   }
 
   function setPool(ids){
-    // al cambiar pool, limpia equipos si hay jugadores fuera del pool
     const set = new Set(ids);
     const A = (Store.state?.team_a || []).filter(p => set.has(p.id));
     const B = (Store.state?.team_b || []).filter(p => set.has(p.id));
@@ -54,12 +62,18 @@ import { listPlayers, upsertPlayer, deletePlayer, deleteAllPlayers } from "./sup
     const players = (Store.players||[]).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
     const pool = poolSet();
     const shown = filtered(players);
+    const c = poolCounts();
 
     mount.innerHTML = `
       <div class="card" style="margin-top:10px;">
         <div style="display:flex; gap:10px; justify-content:space-between; flex-wrap:wrap; align-items:center;">
           <div>
-            <div class="hint muted">Total: <b>${players.length}</b> • En pool: <b>${pool.size}</b></div>
+            <div class="hint muted">Total: <b>${players.length}</b></div>
+            <div class="hint ${c.ok ? "ok" : "warn"}">
+              Pool: <b>${c.total}</b> • D: <b>${c.d}</b> • R: <b>${c.r}</b>
+              ${c.ok ? "✅" : "⚠️"}
+            </div>
+            <div class="hint muted">Tip: debe ser múltiplo de 4 y D=R.</div>
           </div>
           <div class="btns">
             <button class="ghost" id="reloadPlayers">Recargar</button>
@@ -117,11 +131,9 @@ import { listPlayers, upsertPlayer, deletePlayer, deleteAllPlayers } from "./sup
 
     $("searchBox")?.addEventListener("input", (e)=>{ q = e.target.value; render(); });
 
-    // lista
     const listEl = $("list");
     if (listEl){
-      if (!shown.length) listEl.innerHTML = `<div class="hint muted">Sin resultados.</div>`;
-      else listEl.innerHTML = shown.map(p=>{
+      listEl.innerHTML = shown.length ? shown.map(p=>{
         const inPool = pool.has(p.id);
         return `
           <div class="card" style="background: rgba(0,0,0,.18); padding:12px;">
@@ -152,15 +164,15 @@ import { listPlayers, upsertPlayer, deletePlayer, deleteAllPlayers } from "./sup
             </div>
           </div>
         `;
-      }).join("");
+      }).join("") : `<div class="hint muted">Sin resultados.</div>`;
     }
 
-    // handlers pool
+    // pool
     mount.querySelectorAll("[data-pool]").forEach(chk=>{
       chk.addEventListener("change", ()=>{
         const id = chk.getAttribute("data-pool");
         if (chk.checked){
-          const ids = new Set(Store.state?.pool || []);
+          const ids = new Set(poolIds());
           ids.add(id);
           setPool(Array.from(ids));
         } else {
@@ -169,14 +181,10 @@ import { listPlayers, upsertPlayer, deletePlayer, deleteAllPlayers } from "./sup
       });
     });
 
-    // acciones top
+    // top actions
     $("reloadPlayers")?.addEventListener("click", async ()=>{
-      try{
-        setStatus("Recargando…","muted");
-        Store.setPlayers(await listPlayers());
-        setStatus("✅ Recargado.","ok");
-        render();
-      }catch(e){ console.error(e); setStatus("❌ Error al recargar.","error");}
+      try{ setStatus("Recargando…","muted"); Store.setPlayers(await listPlayers()); setStatus("✅ Recargado.","ok"); render(); }
+      catch(e){ console.error(e); setStatus("❌ Error al recargar.","error"); }
     });
 
     $("selectAll")?.addEventListener("click", ()=>{
@@ -186,7 +194,7 @@ import { listPlayers, upsertPlayer, deletePlayer, deleteAllPlayers } from "./sup
     });
 
     $("selectMissing")?.addEventListener("click", ()=>{
-      const ids = new Set(Store.state?.pool || []);
+      const ids = new Set(poolIds());
       players.forEach(p=>ids.add(p.id));
       setPool(Array.from(ids));
       setStatus("✅ Seleccionados faltantes.","ok");
@@ -211,7 +219,7 @@ import { listPlayers, upsertPlayer, deletePlayer, deleteAllPlayers } from "./sup
       }catch(e){ console.error(e); setStatus("❌ Error al borrar.","error");}
     });
 
-    // add player
+    // add
     $("addPlayer")?.addEventListener("click", async ()=>{
       const name = normName($("newName")?.value);
       const side = $("newSide")?.value || "D";
@@ -267,7 +275,7 @@ import { listPlayers, upsertPlayer, deletePlayer, deleteAllPlayers } from "./sup
 
   window.OP = window.OP || {};
   const prev = window.OP.refresh;
-  window.OP.refresh = (view)=>{ if (typeof prev==="function") prev(view); if (view==="base") render(); };
+  window.OP.refresh = (view)=>{ if(typeof prev==="function") prev(view); if(view==="base") render(); };
 
   window.addEventListener("op:storeReady", render);
   window.addEventListener("op:playersChanged", render);
