@@ -1,4 +1,4 @@
-// turns.js — Turnos + marcador 63→6-3 + puntos + guardar a Historial
+// turns.js — Turnos + marcador 63→6-3 + puntos + guardar a Historial (FIX estado viejo)
 import { Store } from "./store.js";
 import { saveResultsToHistory } from "./supabaseApi.js";
 
@@ -35,23 +35,17 @@ import { saveResultsToHistory } from "./supabaseApi.js";
     return { ok: true, msg: "" };
   }
 
-  // Genera parejas dentro de un equipo sin repetir (round-robin simple)
-  // rights[i] con lefts[(i+shift)%m]
   function makePairs(team, shift) {
     const rights = team.filter(p => p.side === "D").slice().sort((a,b)=> (b.rating||0)-(a.rating||0));
     const lefts  = team.filter(p => p.side === "R").slice().sort((a,b)=> (b.rating||0)-(a.rating||0));
     const m = Math.min(rights.length, lefts.length);
     const pairs = [];
     for (let i=0; i<m; i++) {
-      pairs.push({
-        r: rights[i],
-        l: lefts[(i + shift) % m]
-      });
+      pairs.push({ r: rights[i], l: lefts[(i + shift) % m] });
     }
     return pairs;
   }
 
-  // Crea la estructura de turnos (canchas = m) y cruces A vs B
   function generateTurns(turnCount) {
     const { A, B } = getTeams();
     const m = A.length / 2; // canchas
@@ -73,11 +67,7 @@ import { saveResultsToHistory } from "./supabaseApi.js";
         });
       }
 
-      turns.push({
-        turnIndex: t + 1,
-        pointsPerWin: t + 1,
-        matches
-      });
+      turns.push({ turnIndex: t + 1, pointsPerWin: t + 1, matches });
     }
 
     return turns;
@@ -85,27 +75,35 @@ import { saveResultsToHistory } from "./supabaseApi.js";
     function mini(p){ return { id:p.id, name:p.name, side:p.side, rating:p.rating }; }
   }
 
+  // ✅ acepta "63" y también tolera que alguien haya guardado "6-3"
+  function normalizeScore(raw) {
+    if (!raw) return "";
+    const d = String(raw).replace(/\D/g, "").slice(0,2);
+    return d;
+  }
+
   function isCompleteScore(raw) {
-    return /^[0-7]{2}$/.test(raw || "");
+    const d = normalizeScore(raw);
+    return /^[0-7]{2}$/.test(d);
   }
 
   function formatScore(raw) {
-    if (!raw) return "";
-    const digits = String(raw).replace(/\D/g, "").slice(0, 2);
-    if (digits.length === 1) return digits;
-    return `${digits[0]}-${digits[1]}`;
+    const d = normalizeScore(raw);
+    if (!d) return "";
+    if (d.length === 1) return d;
+    return `${d[0]}-${d[1]}`;
   }
 
   function winnerFromScore(raw) {
-    if (!isCompleteScore(raw)) return null;
-    const a = Number(raw[0]);
-    const b = Number(raw[1]);
+    const d = normalizeScore(raw);
+    if (!/^[0-7]{2}$/.test(d)) return null;
+    const a = Number(d[0]);
+    const b = Number(d[1]);
     if (a === b) return null;
     return a > b ? "A" : "B";
   }
 
   function computeSummary(turns) {
-    // points: each match winner gets (turnIndex) points
     const perTurn = [];
     let totalA = 0, totalB = 0;
 
@@ -134,7 +132,6 @@ import { saveResultsToHistory } from "./supabaseApi.js";
     return true;
   }
 
-  // Evitar re-render que roba foco mientras escribes score
   function shouldSkipRenderBecauseTyping() {
     const el = document.activeElement;
     return el && el.classList && el.classList.contains("score-input");
@@ -152,10 +149,9 @@ import { saveResultsToHistory } from "./supabaseApi.js";
     const { A, B } = getTeams();
     const v = validateTeams(A, B);
 
-    const existingTurns = Store.state?.turns || null;
     const turnCount = Math.min(Number(Store.state?.turnCount || 3), MAX_TURNS);
 
-    const turns = Array.isArray(existingTurns) ? existingTurns : null;
+    const turns = Array.isArray(Store.state?.turns) ? Store.state.turns : null;
     const summary = turns ? computeSummary(turns) : null;
 
     mount.innerHTML = `
@@ -195,33 +191,31 @@ import { saveResultsToHistory } from "./supabaseApi.js";
     $("turnCountSel")?.addEventListener("change", (e) => {
       const n = Math.min(Number(e.target.value || 3), MAX_TURNS);
       Store.setState({ turnCount: n });
-      // no re-render agresivo: solo refrescamos si no hay typing
       if (!shouldSkipRenderBecauseTyping()) render();
     });
 
     $("genTurns")?.addEventListener("click", () => {
       const n = Math.min(Number($("turnCountSel")?.value || 3), MAX_TURNS);
       const newTurns = generateTurns(n);
-      Store.setState({ turns: newTurns, scores: null, summary: null, turnCount: n });
+      Store.setState({ turns: newTurns, summary: null, turnCount: n });
       setStatus("✅ Turnos generados. Ingresa marcadores.", "ok");
       render();
     });
 
     $("clearTurns")?.addEventListener("click", () => {
-      Store.setState({ turns: null, scores: null, summary: null });
+      Store.setState({ turns: null, summary: null });
       setStatus("✅ Turnos limpiados.", "ok");
       render();
     });
 
-    // Score input behavior: NO click extra, 2 dígitos 0–7, auto guion, backspace simple
+    // Inputs
     mount.querySelectorAll(".score-input").forEach((inp) => {
       const tIdx = Number(inp.getAttribute("data-t"));
       const mIdx = Number(inp.getAttribute("data-m"));
 
-      // inicializa dataset raw
-      if (!inp.dataset.raw) inp.dataset.raw = "";
+      // sincroniza dataset.raw con lo que hay en estado
+      inp.dataset.raw = normalizeScore(inp.value);
 
-      // bloquear input normal, usar keydown controlado
       inp.addEventListener("keydown", (ev) => {
         const raw = inp.dataset.raw || "";
 
@@ -235,10 +229,8 @@ import { saveResultsToHistory } from "./supabaseApi.js";
           return;
         }
 
-        // permitir tab / arrows
         if (ev.key === "Tab" || ev.key.startsWith("Arrow")) return;
 
-        // dígitos 0-7
         if (/^[0-7]$/.test(ev.key)) {
           ev.preventDefault();
           if (raw.length >= 2) return;
@@ -250,45 +242,37 @@ import { saveResultsToHistory } from "./supabaseApi.js";
           return;
         }
 
-        // bloquea cualquier otra tecla (incluye '-')
-        if (ev.key.length === 1) {
-          ev.preventDefault();
-        }
+        if (ev.key.length === 1) ev.preventDefault();
       });
 
-      // por si pega con mouse (paste)
       inp.addEventListener("paste", (ev) => {
         ev.preventDefault();
         const text = (ev.clipboardData || window.clipboardData).getData("text");
-        const digits = String(text||"").replace(/\D/g,"").replace(/[8-9]/g,"").slice(0,2);
+        const digits = normalizeScore(text).replace(/[8-9]/g,"").slice(0,2);
         inp.dataset.raw = digits;
         inp.value = formatScore(digits);
         updateScoreInState(tIdx, mIdx, digits);
         updateLiveUI();
       });
-
-      // evita que móvil “salte” por render: no hacemos render en input
-      inp.addEventListener("focus", () => {
-        // nada
-      });
     });
 
+    // ✅ FIX: al guardar, leer SIEMPRE el estado actual (no el `turns` del render)
     $("saveTurns")?.addEventListener("click", async () => {
       try {
-        if (!turns) return;
-        if (!allScoresFilled(turns)) {
+        const latestTurns = Array.isArray(Store.state?.turns) ? Store.state.turns : null;
+        if (!latestTurns) return;
+
+        if (!allScoresFilled(latestTurns)) {
           setStatus("⚠️ Completa todos los marcadores antes de guardar.", "warn");
           return;
         }
 
         const date = Store.state?.session_date || new Date().toISOString().slice(0,10);
-        const summaryNow = computeSummary(turns);
+        const summaryNow = computeSummary(latestTurns);
 
-        // guarda en state también
         Store.setState({ summary: summaryNow });
 
-        // guarda en historial (results)
-        await saveResultsToHistory(date, turns, null, summaryNow);
+        await saveResultsToHistory(date, latestTurns, null, summaryNow);
 
         setStatus("✅ Resultados guardados en Historial.", "ok");
       } catch (e) {
@@ -301,7 +285,6 @@ import { saveResultsToHistory } from "./supabaseApi.js";
       const cur = Array.isArray(Store.state?.turns) ? Store.state.turns : null;
       if (!cur) return;
 
-      // mutación segura (clone mínimo)
       const next = cur.map(t => ({
         ...t,
         matches: t.matches.map(m => ({ ...m }))
@@ -311,17 +294,15 @@ import { saveResultsToHistory } from "./supabaseApi.js";
       if (!t) return;
       const m = t.matches[matchIndex0];
       if (!m) return;
-      m.score = raw;
+      m.score = normalizeScore(raw);
 
       Store.setState({ turns: next });
     }
 
     function updateLiveUI() {
-      // actualiza ganador por partido + botones
       const cur = Array.isArray(Store.state?.turns) ? Store.state.turns : null;
       if (!cur) return;
 
-      // Ganadores por match
       cur.forEach((t) => {
         t.matches.forEach((m, mi) => {
           const w = winnerFromScore(m.score);
@@ -333,16 +314,13 @@ import { saveResultsToHistory } from "./supabaseApi.js";
         });
       });
 
-      // Habilitar guardar si completo
       const saveBtn = $("saveTurns");
       if (saveBtn) saveBtn.disabled = !allScoresFilled(cur);
 
-      // refrescar resumen sin re-render completo
       const summaryNow = computeSummary(cur);
       const totalEl = $("overallTotals");
-      if (totalEl) {
-        totalEl.textContent = `Equipo A ${summaryNow.totalA} puntos • Equipo B ${summaryNow.totalB} puntos`;
-      }
+      if (totalEl) totalEl.textContent = `Equipo A ${summaryNow.totalA} puntos • Equipo B ${summaryNow.totalB} puntos`;
+
       summaryNow.perTurn.forEach((pt) => {
         const row = mount.querySelector(`[data-pt="${pt.turn}"]`);
         if (row) row.textContent = `Turno ${pt.turn}: A ${pt.aPts} • B ${pt.bPts}`;
@@ -355,9 +333,7 @@ import { saveResultsToHistory } from "./supabaseApi.js";
       <div class="card" style="margin-top:12px;">
         ${turns.map(t => `
           <div class="card" style="background: rgba(0,0,0,.12); margin-bottom:10px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
-              <h3 style="margin:0;">Turno ${t.turnIndex} <span class="hint muted">(cada victoria vale ${t.pointsPerWin} punto${t.pointsPerWin>1?"s":""})</span></h3>
-            </div>
+            <h3 style="margin:0;">Turno ${t.turnIndex} <span class="hint muted">(cada victoria vale ${t.pointsPerWin} punto${t.pointsPerWin>1?"s":""})</span></h3>
 
             <div style="overflow:auto; margin-top:10px;">
               <table style="width:100%; border-collapse:collapse;">
