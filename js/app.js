@@ -1,6 +1,6 @@
-// app.js (module) — navegación + estado de login Supabase + BLOQUEO si no hay sesión
-
+// app.js (module) — navegación + login + inicializa Store Supabase
 import { signInWithGoogle, signOut, getSession } from "./supabaseApi.js";
+import { Store } from "./store.js";
 
 import "./db.js";
 import "./teams.js";
@@ -19,56 +19,28 @@ import "./history.js";
   }
 
   function show(view) {
-    const map = {
-      base: "viewBase",
-      teams: "viewTeams",
-      turns: "viewTurns",
-      history: "viewHistory",
-    };
-
-    Object.values(map).forEach(id => {
-      const el = $(id);
-      if (el) el.style.display = "none";
-    });
-
+    const map = { base:"viewBase", teams:"viewTeams", turns:"viewTurns", history:"viewHistory" };
+    Object.values(map).forEach(id => { const el = $(id); if (el) el.style.display = "none"; });
     const target = $(map[view]);
     if (target) target.style.display = "";
-
-    setActive(
-      view === "base" ? "navBase" :
-      view === "teams" ? "navTeams" :
-      view === "turns" ? "navTurns" : "navHistory"
-    );
-
+    setActive(view==="base"?"navBase":view==="teams"?"navTeams":view==="turns"?"navTurns":"navHistory");
     window.OP = window.OP || {};
     if (typeof window.OP.refresh === "function") window.OP.refresh(view);
   }
 
   function setAppEnabled(enabled) {
     const gate = $("authGate");
-    const views = ["viewBase", "viewTeams", "viewTurns", "viewHistory"];
-    const navs = ["navBase", "navTeams", "navTurns", "navHistory"];
-
+    const views = ["viewBase","viewTeams","viewTurns","viewHistory"];
+    const navs = ["navBase","navTeams","navTurns","navHistory"];
     if (gate) gate.style.display = enabled ? "none" : "";
-
-    views.forEach(id => {
-      const el = $(id);
-      if (el) el.style.display = enabled ? (id === "viewBase" ? "" : "none") : "none";
-    });
-
-    navs.forEach(id => {
-      const el = $(id);
-      if (el) el.disabled = !enabled;
-    });
-
-    // Si no está enabled, igual dejamos visible el sidebar y la barra auth
+    views.forEach(id => { const el=$(id); if (el) el.style.display = enabled ? (id==="viewBase"?"":"none") : "none"; });
+    navs.forEach(id => { const el=$(id); if (el) el.disabled = !enabled; });
   }
 
   async function refreshAuthUI() {
     const status = $("authStatus");
     const loginBtn = $("loginGoogle");
     const logoutBtn = $("logoutGoogle");
-
     if (!status || !loginBtn || !logoutBtn) return;
 
     status.textContent = "Cargando sesión…";
@@ -85,16 +57,19 @@ import "./history.js";
         logoutBtn.style.display = "";
 
         setAppEnabled(true);
-        window.dispatchEvent(new CustomEvent("op:authChanged", { detail: { session } }));
+
+        // Inicializa Store (carga players + state desde Supabase)
+        if (!Store.ready) {
+          await Store.init();
+        }
+
         show("base");
       } else {
         status.textContent = "No has iniciado sesión.";
         status.className = "hint muted";
         loginBtn.style.display = "";
         logoutBtn.style.display = "none";
-
         setAppEnabled(false);
-        window.dispatchEvent(new CustomEvent("op:authChanged", { detail: { session: null } }));
       }
     } catch (e) {
       console.error(e);
@@ -102,7 +77,6 @@ import "./history.js";
       status.className = "hint error";
       loginBtn.style.display = "";
       logoutBtn.style.display = "none";
-
       setAppEnabled(false);
     }
   }
@@ -114,27 +88,19 @@ import "./history.js";
     $("navHistory")?.addEventListener("click", () => show("history"));
 
     $("loginGoogle")?.addEventListener("click", async () => {
-      try {
-        await signInWithGoogle();
-      } catch (e) {
-        console.error("Login error:", e);
-        alert("No se pudo iniciar sesión. Revisa consola.");
-      }
+      try { await signInWithGoogle(); } catch (e) { console.error(e); alert("No se pudo iniciar sesión."); }
     });
 
     $("logoutGoogle")?.addEventListener("click", async () => {
       await signOut();
-      await refreshAuthUI();
+      location.reload(); // simple y limpio
     });
 
-    // Arranca bloqueado hasta que confirmemos sesión
     setAppEnabled(false);
     refreshAuthUI();
   });
 
   window.OP = window.OP || {};
   window.OP.show = show;
-
-  // Si vuelves del login o cambias de pestaña
   window.addEventListener("focus", refreshAuthUI);
 })();
