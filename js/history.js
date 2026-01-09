@@ -1,10 +1,10 @@
-// history.js — Historial por fecha (equipos + resumen + turnos)
+// history.js — Historial por fecha (equipos + resultados + turnos) con errores visibles
 import { listHistoryDates, getHistoryDetail } from "./supabaseApi.js";
 import { Store } from "./store.js";
 
 (function () {
   const $ = (id) => document.getElementById(id);
-  const esc = (s) => String(s || "")
+  const esc = (s) => String(s ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -14,10 +14,16 @@ import { Store } from "./store.js";
   let selectedDate = null;
 
   function niceDate(yyyy_mm_dd) {
-    // simple: YYYY-MM-DD -> DD Mon YYYY (es)
-    const d = new Date(yyyy_mm_dd + "T00:00:00");
-    if (Number.isNaN(d.getTime())) return yyyy_mm_dd;
+    const d = new Date(String(yyyy_mm_dd).slice(0,10) + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return String(yyyy_mm_dd);
     return d.toLocaleDateString("es-EC", { year:"numeric", month:"long", day:"2-digit" });
+  }
+
+  function formatScore(raw) {
+    if (!raw) return "";
+    const digits = String(raw).replace(/\D/g, "").slice(0,2);
+    if (digits.length === 1) return digits;
+    return `${digits[0]}-${digits[1]}`;
   }
 
   function renderTeamsBlock(teamA, teamB) {
@@ -29,11 +35,11 @@ import { Store } from "./store.js";
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
           <div class="card" style="background: rgba(0,0,0,.12);">
             <h4 style="margin:0 0 10px;">Equipo A (${A.length})</h4>
-            ${A.length ? A.map(p => `<div class="hint muted">${esc(p.name)} • ${p.side} • ${p.rating}</div>`).join("") : `<div class="hint muted">Sin datos</div>`}
+            ${A.length ? A.map(p => `<div class="hint muted">${esc(p.name)} • ${esc(p.side)} • ${esc(p.rating)}</div>`).join("") : `<div class="hint muted">Sin datos</div>`}
           </div>
           <div class="card" style="background: rgba(0,0,0,.12);">
             <h4 style="margin:0 0 10px;">Equipo B (${B.length})</h4>
-            ${B.length ? B.map(p => `<div class="hint muted">${esc(p.name)} • ${p.side} • ${p.rating}</div>`).join("") : `<div class="hint muted">Sin datos</div>`}
+            ${B.length ? B.map(p => `<div class="hint muted">${esc(p.name)} • ${esc(p.side)} • ${esc(p.rating)}</div>`).join("") : `<div class="hint muted">Sin datos</div>`}
           </div>
         </div>
       </div>
@@ -56,11 +62,11 @@ import { Store } from "./store.js";
     return `
       <div class="card" style="margin-top:12px;">
         <h3 style="margin:0 0 10px;">Resultados</h3>
-        <div class="hint ok"><b>Equipo A ${summary.totalA} puntos</b> • <b>Equipo B ${summary.totalB} puntos</b></div>
+        <div class="hint ok"><b>Equipo A ${esc(summary.totalA)} puntos</b> • <b>Equipo B ${esc(summary.totalB)} puntos</b></div>
 
         <div style="margin-top:10px; display:grid; gap:6px;">
           ${(summary.perTurn || []).map(pt => `
-            <div class="hint muted">Turno ${pt.turn}: A ${pt.aPts} • B ${pt.bPts}</div>
+            <div class="hint muted">Turno ${esc(pt.turn)}: A ${esc(pt.aPts)} • B ${esc(pt.bPts)}</div>
           `).join("")}
         </div>
       </div>
@@ -69,7 +75,7 @@ import { Store } from "./store.js";
         <h3 style="margin:0 0 10px;">Turnos</h3>
         ${turns.length ? turns.map(t => `
           <div class="card" style="background: rgba(0,0,0,.12); margin-bottom:10px;">
-            <h4 style="margin:0 0 10px;">Turno ${t.turnIndex}</h4>
+            <h4 style="margin:0 0 10px;">Turno ${esc(t.turnIndex)}</h4>
             <div style="overflow:auto;">
               <table style="width:100%; border-collapse:collapse;">
                 <thead>
@@ -81,11 +87,11 @@ import { Store } from "./store.js";
                   </tr>
                 </thead>
                 <tbody>
-                  ${t.matches.map(m => `
+                  ${(t.matches || []).map(m => `
                     <tr>
-                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">#${m.court}</td>
-                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">${esc(m.top.pair[0].name)} / ${esc(m.top.pair[1].name)}</td>
-                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">${esc(m.bottom.pair[0].name)} / ${esc(m.bottom.pair[1].name)}</td>
+                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">#${esc(m.court)}</td>
+                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">${esc(m.top?.pair?.[0]?.name)} / ${esc(m.top?.pair?.[1]?.name)}</td>
+                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">${esc(m.bottom?.pair?.[0]?.name)} / ${esc(m.bottom?.pair?.[1]?.name)}</td>
                       <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);"><b>${esc(formatScore(m.score))}</b></td>
                     </tr>
                   `).join("")}
@@ -96,18 +102,12 @@ import { Store } from "./store.js";
         `).join("") : `<div class="hint muted">No hay turnos guardados.</div>`}
       </div>
     `;
-
-    function formatScore(raw) {
-      if (!raw) return "";
-      const digits = String(raw).replace(/\D/g, "").slice(0, 2);
-      if (digits.length === 1) return digits;
-      return `${digits[0]}-${digits[1]}`;
-    }
   }
 
   async function loadDates() {
+    // listHistoryDates viene de sessions (equipos guardados)
     const dates = await listHistoryDates();
-    return dates.map(d => d.session_date);
+    return (dates || []).map(d => String(d.session_date).slice(0,10));
   }
 
   async function render() {
@@ -147,17 +147,18 @@ import { Store } from "./store.js";
       dates = await loadDates();
     } catch (e) {
       console.error(e);
-      datesEl.innerHTML = `<div class="hint error">Error cargando historial.</div>`;
+      datesEl.innerHTML = `<div class="hint error">Error cargando historial: ${esc(e?.message || e)}</div>`;
       return;
     }
 
     if (!dates.length) {
       datesEl.innerHTML = `<div class="hint muted">Aún no has guardado equipos/resultados.</div>`;
+      detailEl.innerHTML = "";
     } else {
       if (!selectedDate) selectedDate = dates[0];
 
       datesEl.innerHTML = dates.map(d => `
-        <button class="ghost" data-date="${d}" style="${d===selectedDate ? "border-color: rgba(255,255,255,.35);" : ""}">
+        <button class="ghost" data-date="${esc(d)}" style="${d===selectedDate ? "border-color: rgba(255,255,255,.35);" : ""}">
           ${esc(niceDate(d))}
         </button>
       `).join("");
@@ -169,7 +170,6 @@ import { Store } from "./store.js";
         });
       });
 
-      // detail
       detailEl.innerHTML = `<div class="card" style="margin-top:12px;"><div class="hint muted">Cargando…</div></div>`;
 
       try {
@@ -178,27 +178,30 @@ import { Store } from "./store.js";
         if (!session) {
           detailEl.innerHTML = `
             <div class="card" style="margin-top:12px;">
-              <div class="hint muted">No hay equipos guardados para esta fecha.</div>
-            </div>
-          `;
-        } else {
-          detailEl.innerHTML = `
-            <div class="card" style="margin-top:12px;">
               <h2 style="margin:0;">${esc(niceDate(selectedDate))}</h2>
-              <div class="hint muted" style="margin-top:6px;">Jugadores: <b>${session.totalPlayers || ""}</b></div>
+              <div class="hint muted" style="margin-top:8px;">No hay equipos guardados para esta fecha.</div>
             </div>
-
-            ${renderTeamsBlock(session.team_a, session.team_b)}
-            ${renderResultsBlock(results)}
           `;
+          return;
         }
+
+        detailEl.innerHTML = `
+          <div class="card" style="margin-top:12px;">
+            <h2 style="margin:0;">${esc(niceDate(selectedDate))}</h2>
+            <div class="hint muted" style="margin-top:6px;">Jugadores: <b>${esc(session.totalPlayers || "")}</b></div>
+          </div>
+
+          ${renderTeamsBlock(session.team_a, session.team_b)}
+          ${renderResultsBlock(results)}
+        `;
       } catch (e) {
         console.error(e);
         detailEl.innerHTML = `
-  <div class="card" style="margin-top:12px;">
-    <div class="hint error">Error cargando detalle: ${esc(e?.message || e)}</div>
-  </div>
-`;
+          <div class="card" style="margin-top:12px;">
+            <div class="hint error">Error cargando detalle: ${esc(e?.message || e)}</div>
+            <div class="hint muted" style="margin-top:8px;">Tip: suele ser RLS/policy o constraint de results.</div>
+          </div>
+        `;
       }
     }
 
