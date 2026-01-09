@@ -1,8 +1,7 @@
-// app.js (module) — navegación + estado de login Supabase
+// app.js (module) — navegación + estado de login Supabase + BLOQUEO si no hay sesión
 
 import { signInWithGoogle, signOut, getSession } from "./supabaseApi.js";
 
-// Cargar módulos existentes (se ejecutan como antes)
 import "./db.js";
 import "./teams.js";
 import "./turns.js";
@@ -45,6 +44,26 @@ import "./history.js";
     if (typeof window.OP.refresh === "function") window.OP.refresh(view);
   }
 
+  function setAppEnabled(enabled) {
+    const gate = $("authGate");
+    const views = ["viewBase", "viewTeams", "viewTurns", "viewHistory"];
+    const navs = ["navBase", "navTeams", "navTurns", "navHistory"];
+
+    if (gate) gate.style.display = enabled ? "none" : "";
+
+    views.forEach(id => {
+      const el = $(id);
+      if (el) el.style.display = enabled ? (id === "viewBase" ? "" : "none") : "none";
+    });
+
+    navs.forEach(id => {
+      const el = $(id);
+      if (el) el.disabled = !enabled;
+    });
+
+    // Si no está enabled, igual dejamos visible el sidebar y la barra auth
+  }
+
   async function refreshAuthUI() {
     const status = $("authStatus");
     const loginBtn = $("loginGoogle");
@@ -64,13 +83,17 @@ import "./history.js";
         status.className = "hint ok";
         loginBtn.style.display = "none";
         logoutBtn.style.display = "";
-        // Avisamos a los módulos que ya hay sesión (para cargar data en supabase luego)
+
+        setAppEnabled(true);
         window.dispatchEvent(new CustomEvent("op:authChanged", { detail: { session } }));
+        show("base");
       } else {
         status.textContent = "No has iniciado sesión.";
         status.className = "hint muted";
         loginBtn.style.display = "";
         logoutBtn.style.display = "none";
+
+        setAppEnabled(false);
         window.dispatchEvent(new CustomEvent("op:authChanged", { detail: { session: null } }));
       }
     } catch (e) {
@@ -79,6 +102,8 @@ import "./history.js";
       status.className = "hint error";
       loginBtn.style.display = "";
       logoutBtn.style.display = "none";
+
+      setAppEnabled(false);
     }
   }
 
@@ -102,13 +127,14 @@ import "./history.js";
       await refreshAuthUI();
     });
 
-    show("base");
+    // Arranca bloqueado hasta que confirmemos sesión
+    setAppEnabled(false);
     refreshAuthUI();
   });
 
   window.OP = window.OP || {};
   window.OP.show = show;
 
-  // Por si vuelves de OAuth y la sesión cambia
+  // Si vuelves del login o cambias de pestaña
   window.addEventListener("focus", refreshAuthUI);
 })();
