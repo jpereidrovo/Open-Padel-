@@ -1,4 +1,8 @@
-// db.js — Base de jugadores (Supabase) + edición + borrar todos
+// db.js — Base de jugadores (Supabase) + selección de Pool (sync state)
+// - Checkbox "Pool" por jugador
+// - Al desmarcar, sale del pool y también de Team A/B
+// - Sin localStorage
+
 import { Store } from "./store.js";
 import {
   listPlayers,
@@ -28,6 +32,11 @@ import {
     if (badge) badge.textContent = String(Store.players?.length || 0);
   }
 
+  function getPoolSet() {
+    const pool = Store.state?.pool || [];
+    return new Set(pool);
+  }
+
   function sortPlayers(players) {
     return (players || []).slice().sort((a, b) => {
       const an = (a.name || "").toLowerCase();
@@ -43,11 +52,37 @@ import {
     });
   }
 
+  function removePlayerEverywhere(playerId) {
+    const pool = (Store.state?.pool || []).filter(id => id !== playerId);
+    const teamA = (Store.state?.team_a || []).filter(p => p.id !== playerId);
+    const teamB = (Store.state?.team_b || []).filter(p => p.id !== playerId);
+
+    Store.setState({
+      pool,
+      team_a: teamA,
+      team_b: teamB
+    });
+  }
+
+  function togglePlayerInPool(playerId, checked) {
+    const pool = (Store.state?.pool || []).slice();
+    const set = new Set(pool);
+
+    if (checked) {
+      set.add(playerId);
+    } else {
+      // al desmarcar, sale de pool y equipos
+      removePlayerEverywhere(playerId);
+      return;
+    }
+
+    Store.setState({ pool: Array.from(set) });
+  }
+
   function render() {
     const mount = $("baseMount");
     if (!mount) return;
 
-    // Si Store no está listo (no hay sesión o no cargó aún)
     if (!Store.ready) {
       mount.innerHTML = `
         <div class="card" style="margin-top:10px;">
@@ -59,6 +94,7 @@ import {
     }
 
     const players = sortPlayers(Store.players || []);
+    const poolSet = getPoolSet();
 
     mount.innerHTML = `
       <div class="card" style="margin-top:10px;">
@@ -66,9 +102,11 @@ import {
           <div>
             <div class="hint muted">Jugadores guardados en la nube (Supabase).</div>
             <div class="hint muted">Total: <b>${players.length}</b></div>
+            <div class="hint muted">En pool: <b>${poolSet.size}</b></div>
           </div>
           <div class="btns">
             <button class="ghost" id="reloadPlayers">Recargar</button>
+            <button class="ghost" id="clearPoolBtn">Vaciar pool</button>
             <button class="ghost" id="deleteAllPlayersBtn">Borrar todos</button>
           </div>
         </div>
@@ -103,6 +141,9 @@ import {
 
       <div class="card" style="margin-top:12px;">
         <h3 style="margin:0 0 10px;">Lista</h3>
+        <div class="hint muted" style="margin-bottom:10px;">
+          Marca <b>Pool</b> para seleccionar jugadores que van a jugar hoy.
+        </div>
         <div id="playersList" style="display:grid; gap:10px;"></div>
       </div>
     `;
@@ -121,9 +162,15 @@ import {
       listEl.innerHTML = `<div class="hint muted">No hay jugadores aún.</div>`;
     } else {
       listEl.innerHTML = players.map(p => {
+        const inPool = poolSet.has(p.id);
         return `
           <div class="card" style="background: rgba(0,0,0,.18); padding:12px;">
-            <div style="display:grid; grid-template-columns: 1fr 140px 140px auto; gap:10px; align-items:center;">
+            <div style="display:grid; grid-template-columns: 90px 1fr 120px 120px auto; gap:10px; align-items:center;">
+              <div>
+                <label style="margin:0;">Pool</label>
+                <input type="checkbox" data-pool="${p.id}" ${inPool ? "checked" : ""} />
+              </div>
+
               <div>
                 <label style="margin:0;">Nombre</label>
                 <input data-edit-name="${p.id}" type="text" value="${escapeHtml(p.name)}" />
@@ -168,6 +215,13 @@ import {
       }
     });
 
+    $("clearPoolBtn")?.addEventListener("click", () => {
+      // vaciar pool y equipos
+      Store.setState({ pool: [], team_a: [], team_b: [] });
+      setStatus("✅ Pool vaciado.", "ok");
+      render();
+    });
+
     $("addPlayerBtn")?.addEventListener("click", async () => {
       const name = normalizeName($("newName")?.value);
       const side = $("newSide")?.value || "D";
@@ -190,6 +244,14 @@ import {
         console.error(e);
         setStatus("❌ Error al guardar.", "error");
       }
+    });
+
+    // Pool checkbox handlers
+    mount.querySelectorAll("[data-pool]").forEach(chk => {
+      chk.addEventListener("change", () => {
+        const id = chk.getAttribute("data-pool");
+        togglePlayerInPool(id, chk.checked);
+      });
     });
 
     // Guardar / Borrar individual
@@ -230,6 +292,10 @@ import {
         try {
           setStatus("Borrando…", "muted");
           await deletePlayer(id);
+
+          // si estaba en pool/equipos, lo sacamos también
+          removePlayerEverywhere(id);
+
           const fresh = await listPlayers();
           Store.setPlayers(fresh);
           setBadgeCount();
@@ -248,6 +314,10 @@ import {
       try {
         setStatus("Borrando todo…", "muted");
         await deleteAllPlayers();
+
+        // limpiar pool y equipos
+        Store.setState({ pool: [], team_a: [], team_b: [] });
+
         const fresh = await listPlayers();
         Store.setPlayers(fresh);
         setBadgeCount();
@@ -262,7 +332,7 @@ import {
     setBadgeCount();
   }
 
-  // Hook de refresco cuando navegas a Base
+  // Hook de refresco al navegar a Base
   window.OP = window.OP || {};
   const prevRefresh = window.OP.refresh;
   window.OP.refresh = (view) => {
@@ -270,12 +340,11 @@ import {
     if (view === "base") render();
   };
 
-  // Render cuando el Store está listo o cambia players
   window.addEventListener("op:storeReady", render);
   window.addEventListener("op:playersChanged", () => {
     setBadgeCount();
     render();
   });
-
+  window.addEventListener("op:stateChanged", render);
   document.addEventListener("DOMContentLoaded", render);
 })();
