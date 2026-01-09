@@ -1,356 +1,293 @@
-// teams.js — Equipos A/B + fecha editable + Grabar (solo equipos) a Historial
+// teams.js — Pool + Equipos sincronizados en vivo (Supabase state)
+// Reglas:
+// - Pool: jugadores seleccionados para jugar hoy
+// - Equipos A/B: se arman manual o auto-balanceado
+// - Todo se guarda en Store.state -> Supabase (debounced)
+
+import { Store } from "./store.js";
+
 (function () {
-  const KEY_PLAYERS = "op_players_v1";
-  const KEY_POOL = "op_pool_v1";
-  const KEY_TOTAL = "op_totalPlayers_v1";
-  const KEY_TEAM_A = "op_teamA_v1";
-  const KEY_TEAM_B = "op_teamB_v1";
-
-  const KEY_SESSION_DATE = "op_sessionDate_v1";
-  const KEY_HISTORY = "op_history_v2";
-
-  const ALLOWED_TOTALS = [4, 8, 12, 16, 20, 24];
-
   const $ = (id) => document.getElementById(id);
-  const loadJSON = (k, fb) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fb; } catch { return fb; } };
-  const saveJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
-  function emitTeamsChanged() {
-    try { window.dispatchEvent(new CustomEvent("op:teamsChanged")); } catch {}
+  function escapeHtml(str) {
+    return String(str || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
   }
 
-  function todayISO() {
-    const d = new Date();
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
+  function avg(arr) {
+    if (!arr?.length) return 0;
+    return arr.reduce((s, x) => s + (Number(x.rating) || 0), 0) / arr.length;
   }
 
-  function getSessionDate() {
-    return localStorage.getItem(KEY_SESSION_DATE) || todayISO();
-  }
-  function setSessionDate(v) {
-    localStorage.setItem(KEY_SESSION_DATE, v || todayISO());
+  function getSelectedPlayersFromPoolIds(poolIds) {
+    const set = new Set(poolIds || []);
+    return (Store.players || []).filter(p => set.has(p.id));
   }
 
-  function getPlayers() { return loadJSON(KEY_PLAYERS, []); }
-  function getPool() { return new Set(loadJSON(KEY_POOL, [])); }
-  function getTeamA() { return new Set(loadJSON(KEY_TEAM_A, [])); }
-  function getTeamB() { return new Set(loadJSON(KEY_TEAM_B, [])); }
-  function setPool(s) { saveJSON(KEY_POOL, [...s]); }
-
-  function getTotalPlayers() {
-    const v = Number(localStorage.getItem(KEY_TOTAL) || 16);
-    return ALLOWED_TOTALS.includes(v) ? v : 16;
-  }
-  function teamSize(total) { return total / 2; }
-  function perTeamSide(total) { return teamSize(total) / 2; }
-
-  function listFromIds(ids, players) {
-    return [...ids].map(id => players.find(p => p.id === id)).filter(Boolean);
-  }
-  function countSide(ids, players, side) {
-    return listFromIds(ids, players).filter(p => p.side === side).length;
-  }
-  function avgTeam(idsSet, players) {
-    const arr = listFromIds(idsSet, players);
-    if (!arr.length) return 0;
-    return arr.reduce((s, p) => s + p.rating, 0) / arr.length;
+  function toPlayerMini(p) {
+    return { id: p.id, name: p.name, side: p.side, rating: p.rating };
   }
 
-  function autoBuild(players, poolSet) {
-    const total = getTotalPlayers();
-    const size = teamSize(total);
-    const need = perTeamSide(total);
+  function ensureStateDefaults() {
+    if (!Store.state) return;
+    const s = Store.state;
+    if (!Array.isArray(s.pool)) s.pool = [];
+    if (!Array.isArray(s.team_a)) s.team_a = [];
+    if (!Array.isArray(s.team_b)) s.team_b = [];
+    if (typeof s.total_players !== "number") s.total_players = 16;
+    if (!s.session_date) s.session_date = new Date().toISOString().slice(0, 10);
+  }
 
-    const pool = [...poolSet].map(id => players.find(p => p.id === id)).filter(Boolean);
-    if (pool.length !== total) return { ok: false, msg: `El pool debe tener exactamente ${total} jugadores (ahora: ${pool.length}).` };
+  function canPlaySelection(players) {
+    if (!players?.length) return { ok: false, msg: "Selecciona jugadores al pool." };
+    if (players.length % 4 !== 0) return { ok: false, msg: "El pool debe ser múltiplo de 4 (4,8,12,16...)."};
+    const d = players.filter(p => p.side === "D").length;
+    const r = players.filter(p => p.side === "R").length;
+    if (d !== r) return { ok: false, msg: "Debe haber igual cantidad de Derechas (D) y Revés (R)."};
+    return { ok: true, msg: "" };
+  }
 
-    const Ds = pool.filter(p => p.side === "D").sort((a, b) => b.rating - a.rating);
-    const Rs = pool.filter(p => p.side === "R").sort((a, b) => b.rating - a.rating);
+  // Auto-balance: idea que pediste
+  // 1) toma top2 D y top2 R
+  // 2) reparte 1 y 1 en cada equipo
+  // 3) el resto lo asigna con greedy por promedio total (manteniendo igual D/R)
+  function autoBalanceTeams(poolPlayers) {
+    const rights = poolPlayers.filter(p => p.side === "D").sort((a,b)=>b.rating-a.rating);
+    const lefts  = poolPlayers.filter(p => p.side === "R").sort((a,b)=>b.rating-a.rating);
 
-    if (Ds.length !== total / 2 || Rs.length !== total / 2) {
-      return { ok: false, msg: `Pool debe estar balanceado: D=${total / 2} y R=${total / 2} (ahora D=${Ds.length}, R=${Rs.length}).` };
+    const A = [];
+    const B = [];
+
+    // seed: top2 de cada lado
+    const seedR = rights.slice(0, 2);
+    const seedL = lefts.slice(0, 2);
+
+    if (seedR.length >= 2) { A.push(seedR[0]); B.push(seedR[1]); }
+    else if (seedR.length === 1) { A.push(seedR[0]); }
+
+    if (seedL.length >= 2) { A.push(seedL[0]); B.push(seedL[1]); }
+    else if (seedL.length === 1) { A.push(seedL[0]); }
+
+    const used = new Set([...A, ...B].map(p => p.id));
+    const restR = rights.filter(p => !used.has(p.id));
+    const restL = lefts.filter(p => !used.has(p.id));
+
+    const targetSize = poolPlayers.length / 2;
+    const targetPerSide = poolPlayers.length / 4; // por equipo
+
+    function countSide(team, side) { return team.filter(p => p.side === side).length; }
+    function teamSum(team) { return team.reduce((s,p)=>s+(p.rating||0),0); }
+
+    // greedy intercalado: siempre intenta minimizar diferencia
+    const combined = [];
+    // Mezcla altos a bajos para estabilizar
+    for (let i=0; i<Math.max(restR.length, restL.length); i++) {
+      if (i < restR.length) combined.push(restR[i]);
+      if (i < restL.length) combined.push(restL[i]);
     }
 
-    const A = new Set(), B = new Set();
-    const seeds = [Ds.shift(), Rs.shift(), Ds.shift(), Rs.shift()].filter(Boolean);
-    let sumA = 0, sumB = 0;
-    for (const p of seeds) {
-      if (sumA <= sumB) { A.add(p.id); sumA += p.rating; }
-      else { B.add(p.id); sumB += p.rating; }
+    for (const p of combined) {
+      if (A.length >= targetSize && B.length >= targetSize) break;
+
+      const aSideOk = countSide(A, p.side) < targetPerSide && A.length < targetSize;
+      const bSideOk = countSide(B, p.side) < targetPerSide && B.length < targetSize;
+
+      // si solo uno puede, va ahí
+      if (aSideOk && !bSideOk) { A.push(p); continue; }
+      if (!aSideOk && bSideOk) { B.push(p); continue; }
+
+      // ambos pueden: va al que deje menor diferencia
+      const aSum = teamSum(A), bSum = teamSum(B);
+      const diffIfA = Math.abs((aSum + p.rating) - bSum);
+      const diffIfB = Math.abs(aSum - (bSum + p.rating));
+      if (diffIfA <= diffIfB) A.push(p); else B.push(p);
     }
 
-    function countTeamSide(set, side) {
-      let c = 0;
-      for (const id of set) {
-        const p = pool.find(x => x.id === id);
-        if (p && p.side === side) c++;
-      }
-      return c;
-    }
-    function canAdd(set, p) {
-      if (set.size >= size) return false;
-      if (p.side === "D" && countTeamSide(set, "D") >= need) return false;
-      if (p.side === "R" && countTeamSide(set, "R") >= need) return false;
-      return true;
-    }
-    const avg = (set) => {
-      const arr = [...set].map(id => pool.find(x => x.id === id)).filter(Boolean);
-      if (!arr.length) return 0;
-      return arr.reduce((s, p) => s + p.rating, 0) / arr.length;
-    };
-
-    const rest = [...Ds, ...Rs].sort((a, b) => b.rating - a.rating);
-    for (const p of rest) {
-      const first = avg(A) <= avg(B) ? A : B;
-      const second = first === A ? B : A;
-      if (canAdd(first, p)) first.add(p.id);
-      else if (canAdd(second, p)) second.add(p.id);
-      else return { ok: false, msg: "No se pudo balancear." };
-    }
-
-    return { ok: true, A, B, msg: `✅ Autoarmado OK • Prom A=${avg(A).toFixed(2)} B=${avg(B).toFixed(2)}` };
-  }
-
-  function normalize(players, pool, A, B) {
-    const total = getTotalPlayers();
-    const valid = new Set(players.map(p => p.id));
-    const clean = (set) => new Set([...set].filter(id => valid.has(id)));
-
-    pool = clean(pool);
-    A = clean(A);
-    B = clean(B);
-
-    for (const id of A) B.delete(id);
-    if (pool.size > total) pool = new Set([...pool].slice(0, total));
-
-    saveJSON(KEY_POOL, [...pool]);
-    saveJSON(KEY_TEAM_A, [...A]);
-    saveJSON(KEY_TEAM_B, [...B]);
-
-    return { pool, A, B };
-  }
-
-  function snapshotTeams(players, Aset, Bset) {
-    const A = listFromIds(Aset, players).map(p => ({ id: p.id, name: p.name, side: p.side, rating: p.rating }));
-    const B = listFromIds(Bset, players).map(p => ({ id: p.id, name: p.name, side: p.side, rating: p.rating }));
     return { A, B };
-  }
-
-  function upsertHistoryTeams(dateISO, totalPlayers, teamsSnap) {
-    const hist = loadJSON(KEY_HISTORY, []);
-    const idx = hist.findIndex(x => x.date === dateISO);
-
-    const nowISO = new Date().toISOString();
-
-    if (idx >= 0) {
-      hist[idx] = {
-        ...hist[idx],
-        date: dateISO,
-        totalPlayers,
-        teams: teamsSnap,
-        updatedAt: nowISO,
-        createdAt: hist[idx].createdAt || nowISO,
-      };
-    } else {
-      hist.unshift({
-        date: dateISO,
-        totalPlayers,
-        teams: teamsSnap,
-        turns: null,
-        createdAt: nowISO,
-        updatedAt: nowISO,
-      });
-    }
-    saveJSON(KEY_HISTORY, hist);
   }
 
   function render() {
     const mount = $("teamsMount");
     if (!mount) return;
 
-    const players = getPlayers();
-    let pool = getPool();
-    let A = getTeamA();
-    let B = getTeamB();
+    if (!Store.ready) {
+      mount.innerHTML = `
+        <div class="card" style="margin-top:10px;">
+          <div class="hint muted">Inicia sesión para usar Equipos.</div>
+        </div>
+      `;
+      return;
+    }
 
-    ({ pool, A, B } = normalize(players, pool, A, B));
+    ensureStateDefaults();
 
-    const total = getTotalPlayers();
-    const size = teamSize(total);
-    const need = perTeamSide(total);
+    const s = Store.state;
+    const poolPlayers = getSelectedPlayersFromPoolIds(s.pool);
+    const teamA = (s.team_a || []).slice();
+    const teamB = (s.team_b || []).slice();
 
-    const poolArr = listFromIds(pool, players).sort((a, b) => a.side.localeCompare(b.side) || b.rating - a.rating || a.name.localeCompare(b.name));
-    const aArr = listFromIds(A, players).sort((a, b) => a.side.localeCompare(b.side) || b.rating - a.rating || a.name.localeCompare(b.name));
-    const bArr = listFromIds(B, players).sort((a, b) => a.side.localeCompare(b.side) || b.rating - a.rating || a.name.localeCompare(b.name));
+    const val = canPlaySelection(poolPlayers);
 
-    const aD = countSide(A, players, "D"), aR = countSide(A, players, "R");
-    const bD = countSide(B, players, "D"), bR = countSide(B, players, "R");
-
-    const avgA = avgTeam(A, players);
-    const avgB = avgTeam(B, players);
-
-    const inTeams = new Set([...A, ...B]);
-    const sessionDate = getSessionDate();
+    const avgA = avg(teamA);
+    const avgB = avg(teamB);
 
     mount.innerHTML = `
       <div class="card" style="margin-top:10px;">
-        <div style="display:grid; grid-template-columns: 1fr auto; gap:12px; align-items:end;">
+        <div style="display:flex; gap:10px; justify-content:space-between; flex-wrap:wrap; align-items:center;">
           <div>
-            <label>Fecha</label>
-            <input id="sessionDate" type="date" value="${sessionDate}">
-            <div class="hint muted" style="margin-top:6px;">
-              N: <b>${total}</b> • Cada equipo: <b>${size}</b> (D=${need}, R=${need})
-            </div>
+            <div class="hint muted">Selecciona jugadores para el pool y arma equipos (sincronizado en vivo).</div>
+            <div class="hint ${val.ok ? "ok" : "warn"}">${val.ok ? "✅ Pool válido" : "⚠️ " + val.msg}</div>
           </div>
-          <div class="btns" style="justify-content:end;">
-            <button class="primary" id="autoBtn">Autoarmar</button>
-            <button class="ghost" id="saveTeamsBtn">Grabar</button>
-            <button class="ghost" id="clearBtn">Limpiar equipos</button>
+          <div class="btns">
+            <button class="ghost" id="btnClearTeams">Limpiar equipos</button>
+            <button class="primary" id="btnAutoTeams" ${val.ok ? "" : "disabled"}>Autoarmar (balanceado)</button>
           </div>
         </div>
-        <div class="hint" id="statusTeams" style="margin-top:10px;"></div>
       </div>
 
-      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; margin-top:12px;">
-        <div class="card">
-          <h3 style="margin:0 0 10px;">Pool (${poolArr.length}/${total})</h3>
-          <div id="poolList" style="display:grid; gap:8px;"></div>
+      <div class="card" style="margin-top:12px;">
+        <h3 style="margin:0 0 10px;">Pool de jugadores (${poolPlayers.length})</h3>
+        <div class="hint muted" style="margin-bottom:10px;">Marca jugadores en la Base y aquí se sincroniza el pool.</div>
+        <div id="poolList" style="display:grid; gap:10px;"></div>
+      </div>
+
+      <div class="card" style="margin-top:12px;">
+        <h3 style="margin:0 0 10px;">Equipos</h3>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+          <div class="card" style="background: rgba(0,0,0,.18);">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <h4 style="margin:0;">Equipo A</h4>
+              <div class="hint ${Math.abs(avgA-avgB) <= 0.35 ? "ok" : "muted"}">Prom: ${avgA.toFixed(2)}</div>
+            </div>
+            <div id="teamAList" style="display:grid; gap:8px; margin-top:10px;"></div>
+          </div>
+
+          <div class="card" style="background: rgba(0,0,0,.18);">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <h4 style="margin:0;">Equipo B</h4>
+              <div class="hint ${Math.abs(avgA-avgB) <= 0.35 ? "ok" : "muted"}">Prom: ${avgB.toFixed(2)}</div>
+            </div>
+            <div id="teamBList" style="display:grid; gap:8px; margin-top:10px;"></div>
+          </div>
         </div>
-        <div class="card">
-          <h3 style="margin:0 0 10px;">
-            Equipo A (${aArr.length}/${size}) • D:${aD}/${need} R:${aR}/${need} • Prom: ${avgA ? avgA.toFixed(2) : "—"}
-          </h3>
-          <div id="aList" style="display:grid; gap:8px;"></div>
-        </div>
-        <div class="card">
-          <h3 style="margin:0 0 10px;">
-            Equipo B (${bArr.length}/${size}) • D:${bD}/${need} R:${bR}/${need} • Prom: ${avgB ? avgB.toFixed(2) : "—"}
-          </h3>
-          <div id="bList" style="display:grid; gap:8px;"></div>
+
+        <div class="hint muted" style="margin-top:10px;">
+          Diferencia de promedios: <b>${Math.abs(avgA-avgB).toFixed(2)}</b>
         </div>
       </div>
     `;
 
-    const st = $("statusTeams");
-    const setStatus = (msg, kind) => { st.textContent = msg; st.className = "hint " + (kind || ""); };
-
-    function canMoveToTeam(teamSet, p) {
-      if (teamSet.size >= size) return false;
-      const d = countSide(teamSet, players, "D");
-      const r = countSide(teamSet, players, "R");
-      if (p.side === "D" && d >= need) return false;
-      if (p.side === "R" && r >= need) return false;
-      return true;
+    // Render Pool list
+    const poolEl = $("poolList");
+    if (poolEl) {
+      if (!poolPlayers.length) {
+        poolEl.innerHTML = `<div class="hint muted">No hay jugadores en el pool. Ve a Base y selecciónalos para jugar.</div>`;
+      } else {
+        poolEl.innerHTML = poolPlayers.map(p => `
+          <div class="card" style="background: rgba(0,0,0,.18); padding:10px; display:flex; justify-content:space-between; gap:10px; align-items:center;">
+            <div>
+              <div><b>${escapeHtml(p.name)}</b></div>
+              <div class="hint muted">${p.side === "D" ? "Derecha" : "Revés"} • Nivel ${p.rating}</div>
+            </div>
+            <div class="btns">
+              <button class="ghost" data-to-a="${p.id}">→ A</button>
+              <button class="ghost" data-to-b="${p.id}">→ B</button>
+            </div>
+          </div>
+        `).join("");
+      }
     }
 
-    function cardRow(p, actionsHtml) {
-      return `
-        <div class="card" style="padding:10px 12px; background: rgba(0,0,0,.18);">
-          <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
-            <div><b>${p.name}</b> <span class="pill">${p.side}</span> <span class="pill">${p.rating}</span></div>
-            <div class="btns">${actionsHtml}</div>
+    // Render team lists
+    function renderTeam(elId, team, other) {
+      const el = $(elId);
+      if (!el) return;
+
+      if (!team.length) {
+        el.innerHTML = `<div class="hint muted">Vacío</div>`;
+        return;
+      }
+
+      el.innerHTML = team.map(p => `
+        <div class="card" style="background: rgba(0,0,0,.12); padding:10px; display:flex; justify-content:space-between; gap:10px; align-items:center;">
+          <div>
+            <div><b>${escapeHtml(p.name)}</b></div>
+            <div class="hint muted">${p.side === "D" ? "D" : "R"} • ${p.rating}</div>
+          </div>
+          <div class="btns">
+            <button class="ghost" data-remove="${p.id}">Quitar</button>
           </div>
         </div>
-      `;
+      `).join("");
     }
 
-    $("poolList").innerHTML = poolArr.map(p => {
-      const already = inTeams.has(p.id);
-      const disA = !canMoveToTeam(A, p) || already;
-      const disB = !canMoveToTeam(B, p) || already;
+    renderTeam("teamAList", teamA, teamB);
+    renderTeam("teamBList", teamB, teamA);
 
-      return cardRow(p, `
-        <button class="ghost small" data-m="A" data-id="${p.id}" ${disA ? "disabled" : ""}>→ A</button>
-        <button class="ghost small" data-m="B" data-id="${p.id}" ${disB ? "disabled" : ""}>→ B</button>
-      `);
-    }).join("") || `<div class="hint muted">Vacío</div>`;
-
-    $("aList").innerHTML = aArr.map(p => cardRow(p, `
-      <button class="ghost small" data-m="POOL" data-id="${p.id}">← Pool</button>
-    `)).join("") || `<div class="hint muted">Vacío</div>`;
-
-    $("bList").innerHTML = bArr.map(p => cardRow(p, `
-      <button class="ghost small" data-m="POOL" data-id="${p.id}">← Pool</button>
-    `)).join("") || `<div class="hint muted">Vacío</div>`;
-
-    $("sessionDate").addEventListener("change", (e) => {
-      setSessionDate(e.target.value || todayISO());
-      setStatus("Fecha actualizada.", "ok");
-    });
-
-    mount.querySelectorAll("[data-m]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const id = btn.getAttribute("data-id");
-        const move = btn.getAttribute("data-m");
-        if (!id || !move) return;
-
-        const p = players.find(x => x.id === id);
-        if (!p) return;
-
-        let pool2 = getPool();
-        let A2 = getTeamA();
-        let B2 = getTeamB();
-
-        pool2.delete(id); A2.delete(id); B2.delete(id);
-
-        if (move === "A") {
-          if (!canMoveToTeam(A2, p)) return;
-          A2.add(id);
-        } else if (move === "B") {
-          if (!canMoveToTeam(B2, p)) return;
-          B2.add(id);
-        } else {
-          pool2.add(id);
-        }
-
-        saveJSON(KEY_POOL, [...pool2]);
-        saveJSON(KEY_TEAM_A, [...A2]);
-        saveJSON(KEY_TEAM_B, [...B2]);
-        emitTeamsChanged();
-        render();
+    // Helpers to set state
+    function setTeams(newA, newB) {
+      Store.setState({
+        team_a: newA.map(toPlayerMini),
+        team_b: newB.map(toPlayerMini)
       });
+    }
+
+    function removeFromTeams(pid) {
+      const newA = teamA.filter(p => p.id !== pid);
+      const newB = teamB.filter(p => p.id !== pid);
+      setTeams(newA, newB);
+    }
+
+    function addToTeam(pid, teamName) {
+      const p = poolPlayers.find(x => x.id === pid);
+      if (!p) return;
+
+      // Evitar duplicados
+      const inA = teamA.some(x => x.id === pid);
+      const inB = teamB.some(x => x.id === pid);
+      if (inA || inB) return;
+
+      const newA = teamA.slice();
+      const newB = teamB.slice();
+      if (teamName === "A") newA.push(p);
+      else newB.push(p);
+
+      setTeams(newA, newB);
+    }
+
+    // Click handlers pool -> teams
+    mount.querySelectorAll("[data-to-a]").forEach(btn => {
+      btn.addEventListener("click", () => addToTeam(btn.getAttribute("data-to-a"), "A"));
+    });
+    mount.querySelectorAll("[data-to-b]").forEach(btn => {
+      btn.addEventListener("click", () => addToTeam(btn.getAttribute("data-to-b"), "B"));
     });
 
-    $("autoBtn").addEventListener("click", () => {
-      const res = autoBuild(players, getPool());
-      if (!res.ok) return setStatus(res.msg, "error");
-
-      saveJSON(KEY_TEAM_A, [...res.A]);
-      saveJSON(KEY_TEAM_B, [...res.B]);
-      setPool(new Set());
-      emitTeamsChanged();
-      setStatus(res.msg, "ok");
-      render();
+    // Remove buttons in both teams
+    mount.querySelectorAll("[data-remove]").forEach(btn => {
+      btn.addEventListener("click", () => removeFromTeams(btn.getAttribute("data-remove")));
     });
 
-    $("clearBtn").addEventListener("click", () => {
-      const pool2 = new Set([...getPool(), ...getTeamA(), ...getTeamB()]);
-      saveJSON(KEY_POOL, [...pool2]);
-      saveJSON(KEY_TEAM_A, []);
-      saveJSON(KEY_TEAM_B, []);
-      emitTeamsChanged();
-      setStatus("Equipos limpiados (devueltos al pool).", "ok");
-      render();
+    // Clear teams
+    $("btnClearTeams")?.addEventListener("click", () => {
+      Store.setState({ team_a: [], team_b: [] });
     });
 
-    // Grabar SOLO equipos a historial
-    $("saveTeamsBtn").addEventListener("click", () => {
-      const date = $("sessionDate").value || todayISO();
-      setSessionDate(date);
-
-      if (aArr.length !== size || bArr.length !== size) return setStatus("No se puede grabar: equipos incompletos.", "warn");
-      if (aD !== need || aR !== need || bD !== need || bR !== need) return setStatus("No se puede grabar: equipos no balanceados D/R.", "warn");
-
-      const teamsSnap = snapshotTeams(players, getTeamA(), getTeamB());
-      upsertHistoryTeams(date, getTotalPlayers(), teamsSnap);
-
-      setStatus("✅ Equipos grabados en Historial.", "ok");
+    // Auto-balance
+    $("btnAutoTeams")?.addEventListener("click", () => {
+      if (!val.ok) return;
+      const { A, B } = autoBalanceTeams(poolPlayers);
+      setTeams(A, B);
     });
   }
 
+  // Vincular selección del pool desde Base:
+  // asumimos que la Base marcará el pool actualizando Store.state.pool
+  // Aquí solo renderizamos cuando cambie state o players.
   window.OP = window.OP || {};
   const prevRefresh = window.OP.refresh;
   window.OP.refresh = (view) => {
@@ -358,6 +295,8 @@
     if (view === "teams") render();
   };
 
-  window.addEventListener("op:poolChanged", () => render());
+  window.addEventListener("op:storeReady", render);
+  window.addEventListener("op:playersChanged", render);
+  window.addEventListener("op:stateChanged", render);
   document.addEventListener("DOMContentLoaded", render);
 })();
