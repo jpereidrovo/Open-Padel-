@@ -194,7 +194,11 @@ import { Store } from "./store.js";
         }
       } catch (e) {
         console.error(e);
-        detailEl.innerHTML = `<div class="card" style="margin-top:12px;"><div class="hint error">Error cargando detalle.</div></div>`;
+        detailEl.innerHTML = `
+  <div class="card" style="margin-top:12px;">
+    <div class="hint error">Error cargando detalle: ${esc(e?.message || e)}</div>
+  </div>
+`;
       }
     }
 
