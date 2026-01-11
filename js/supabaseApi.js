@@ -1,11 +1,16 @@
 // supabaseApi.js — API única para Supabase (auth + players + history)
-// Debe coincidir con los imports de app.js / db.js / teams.js / turns.js / history.js
+// Copiar/pegar completo. No editar nombres de exports.
 
 import { supabase } from "./supabaseClient.js";
 
 export const GROUP_CODE = "open-padel";
 
-// ---------------------- helpers ----------------------
+/* --------------------- HELPERS --------------------- */
+
+function toISODate(d) {
+  return String(d || "").slice(0, 10); // YYYY-MM-DD
+}
+
 export async function requireSession() {
   const { data, error } = await supabase.auth.getSession();
   if (error) throw error;
@@ -14,13 +19,10 @@ export async function requireSession() {
   return session;
 }
 
-function toISODate(d) {
-  return String(d || "").slice(0, 10); // YYYY-MM-DD
-}
+/* --------------------- AUTH --------------------- */
 
-// ---------------------- AUTH ----------------------
 export async function signInWithGoogle() {
-  // GitHub Pages: debe incluir pathname del repo
+  // GitHub Pages: mantener origin + pathname del repo
   const redirectTo = window.location.origin + window.location.pathname;
 
   const { error } = await supabase.auth.signInWithOAuth({
@@ -39,16 +41,25 @@ export async function signOut() {
   if (error) throw error;
 }
 
-// ✅ ESTE ES EL QUE TE FALTABA
 export async function getSessionUser() {
   const { data, error } = await supabase.auth.getUser();
   if (error) throw error;
   return data?.user || null;
 }
 
-// ---------------------- PLAYERS ----------------------
+/* --------------------- PLAYERS --------------------- */
+/*
+Tabla esperada: public.players
+- id uuid (default gen_random_uuid())
+- name text not null
+- side text not null  ('D' o 'R')
+- rating numeric(3,1) o integer (si aún no migraste)
+- group_code text default 'open-padel'
+*/
+
 export async function listPlayers() {
   await requireSession();
+
   const { data, error } = await supabase
     .from("players")
     .select("id,name,side,rating,created_at,updated_at,group_code")
@@ -64,12 +75,16 @@ export async function upsertPlayer(player) {
 
   const payload = {
     group_code: GROUP_CODE,
-    ...player,
-    name: String(player.name || "").trim(),
-    side: player.side === "R" ? "R" : "D",
-    rating: Number(player.rating || 5),
+    id: player?.id || undefined, // si no hay id, supabase genera
+    name: String(player?.name || "").trim(),
+    side: player?.side === "R" ? "R" : "D",
+    // rating puede ser decimal (0.5) si migraste la tabla
+    rating: Number(player?.rating ?? 5),
     updated_at: new Date().toISOString()
   };
+
+  if (!payload.name) throw new Error("Nombre vacío.");
+  if (payload.rating < 0 || payload.rating > 10) throw new Error("Rating fuera de rango (0-10).");
 
   const { error } = await supabase.from("players").upsert(payload);
   if (error) throw error;
@@ -77,6 +92,7 @@ export async function upsertPlayer(player) {
 
 export async function deletePlayer(id) {
   await requireSession();
+
   const { error } = await supabase
     .from("players")
     .delete()
@@ -88,6 +104,7 @@ export async function deletePlayer(id) {
 
 export async function deleteAllPlayers() {
   await requireSession();
+
   const { error } = await supabase
     .from("players")
     .delete()
@@ -96,7 +113,17 @@ export async function deleteAllPlayers() {
   if (error) throw error;
 }
 
-// ---------------------- HISTORY: SESSIONS (equipos) ----------------------
+/* --------------------- HISTORY: SESSIONS (Equipos) --------------------- */
+/*
+Tabla esperada: public.sessions
+- group_code text
+- session_date date
+- totalPlayers integer
+- team_a jsonb
+- team_b jsonb
+UNIQUE (group_code, session_date)
+*/
+
 export async function saveTeamsToHistory(session_date, totalPlayers, team_a, team_b) {
   await requireSession();
 
@@ -131,7 +158,17 @@ export async function listHistoryDates() {
   return data || [];
 }
 
-// ---------------------- HISTORY: RESULTS (turnos + resumen) ----------------------
+/* --------------------- HISTORY: RESULTS (Turnos + resumen) --------------------- */
+/*
+Tabla esperada: public.results
+- group_code text
+- session_date date
+- turns jsonb
+- scores jsonb (opcional)
+- summary jsonb
+UNIQUE (group_code, session_date)
+*/
+
 export async function saveResultsToHistory(session_date, turns, scores, summary) {
   await requireSession();
 
