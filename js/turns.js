@@ -1,4 +1,4 @@
-// turns.js — Generar turnos + ingresar marcadores + guardar a historial (results)
+// turns.js — Generar turnos + ingresar marcadores (fluido) + guardar a historial (results)
 
 import { Store } from "./store.js";
 import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
@@ -20,50 +20,46 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     return `${yyyy}-${mm}-${dd}`;
   }
 
-  function formatScoreDigits(raw) {
-    const digits = String(raw || "").replace(/\D/g, "").slice(0, 2);
+  function scoreDigits(raw) {
+    return String(raw || "").replace(/\D/g, "").slice(0, 2);
+  }
+
+  function formatScore(raw) {
+    const digits = scoreDigits(raw);
     if (digits.length === 0) return "";
     if (digits.length === 1) return digits;
     return `${digits[0]}-${digits[1]}`;
   }
 
   function parseScore(raw) {
-    const digits = String(raw || "").replace(/\D/g, "").slice(0, 2);
+    const digits = scoreDigits(raw);
     if (digits.length !== 2) return null;
     const a = Number(digits[0]);
     const b = Number(digits[1]);
     if (Number.isNaN(a) || Number.isNaN(b)) return null;
     if (a < 0 || a > 7 || b < 0 || b > 7) return null;
-    if (a === b) return null; // no empates
+    if (a === b) return null;
     return { a, b, digits };
   }
 
-  function winnerFromScore(scoreObj) {
-    if (!scoreObj) return null;
-    return scoreObj.a > scoreObj.b ? "TOP" : "BOTTOM";
+  function winnerFromScore(sc) {
+    if (!sc) return null;
+    return sc.a > sc.b ? "A" : "B";
   }
 
-  // Crea parejas dentro de un equipo: siempre 1 D + 1 R
   function buildPairs(teamPlayers) {
     const D = teamPlayers.filter(p => p.side === "D").sort((a,b)=>Number(b.rating)-Number(a.rating));
     const R = teamPlayers.filter(p => p.side === "R").sort((a,b)=>Number(b.rating)-Number(a.rating));
     const pairs = [];
     const n = Math.min(D.length, R.length);
-    for (let i = 0; i < n; i++) {
-      pairs.push([D[i], R[i]]);
-    }
+    for (let i = 0; i < n; i++) pairs.push([D[i], R[i]]);
     return pairs;
   }
 
-  // Genera cruces A vs B por canchas para un turno, intentando evitar repetir parejas A o B entre turnos
   function generateTurns(teamA, teamB, numTurns) {
-    const pairsA = buildPairs(teamA);
-    const pairsB = buildPairs(teamB);
-
-    const courts = Math.min(pairsA.length, pairsB.length);
+    const courts = Math.min(buildPairs(teamA).length, buildPairs(teamB).length);
     if (courts <= 0) throw new Error("Equipos incompletos para armar parejas.");
 
-    // helper shuffle
     const shuffle = (arr) => {
       const a = arr.slice();
       for (let i = a.length - 1; i > 0; i--) {
@@ -73,20 +69,13 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       return a;
     };
 
-    // para evitar repeticiones exactas de parejas dentro del mismo equipo en turnos
-    // (siempre serán las mismas parejas si buildPairs es fijo; por eso hacemos “re-parejas” por turno)
-    // estrategia: remezclar D y R dentro de cada equipo por turno
-    const turns = [];
-    const usedPairsA = new Set(); // "id1-id2"
-    const usedPairsB = new Set();
+    const usedA = new Set();
+    const usedB = new Set();
+    const pairKey = (p) => [p[0].id, p[1].id].sort().join("-");
 
-    const pairKey = (p) => {
-      const ids = [p[0].id, p[1].id].sort();
-      return ids.join("-");
-    };
+    const turns = [];
 
     for (let t = 1; t <= numTurns; t++) {
-      // intentar varias veces para no repetir parejas internas
       let best = null;
 
       for (let attempt = 0; attempt < 40; attempt++) {
@@ -98,20 +87,15 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         const nA = Math.min(AD.length, AR.length);
         const nB = Math.min(BD.length, BR.length);
 
-        const candPairsA = [];
-        const candPairsB = [];
+        const Ause = [];
+        const Buse = [];
 
-        for (let i = 0; i < nA; i++) candPairsA.push([AD[i], AR[i]]);
-        for (let i = 0; i < nB; i++) candPairsB.push([BD[i], BR[i]]);
+        for (let i = 0; i < nA && Ause.length < courts; i++) Ause.push([AD[i], AR[i]]);
+        for (let i = 0; i < nB && Buse.length < courts; i++) Buse.push([BD[i], BR[i]]);
 
-        // recorta al número de canchas
-        const Ause = candPairsA.slice(0, courts);
-        const Buse = candPairsB.slice(0, courts);
-
-        // score attempt: cuántas parejas nuevas logra
         let newCount = 0;
-        for (const p of Ause) if (!usedPairsA.has(pairKey(p))) newCount++;
-        for (const p of Buse) if (!usedPairsB.has(pairKey(p))) newCount++;
+        for (const p of Ause) if (!usedA.has(pairKey(p))) newCount++;
+        for (const p of Buse) if (!usedB.has(pairKey(p))) newCount++;
 
         if (!best || newCount > best.newCount) {
           best = { Ause, Buse, newCount };
@@ -119,21 +103,16 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         }
       }
 
-      const Ause = best.Ause;
-      const Buse = best.Buse;
+      for (const p of best.Ause) usedA.add(pairKey(p));
+      for (const p of best.Buse) usedB.add(pairKey(p));
 
-      // guarda como usadas
-      for (const p of Ause) usedPairsA.add(pairKey(p));
-      for (const p of Buse) usedPairsB.add(pairKey(p));
-
-      // arma matches (cancha i): pareja A vs pareja B
       const matches = [];
       for (let i = 0; i < courts; i++) {
         matches.push({
           court: i + 1,
-          top: { team: "A", pair: Ause[i] },     // arriba = equipo A
-          bottom: { team: "B", pair: Buse[i] },  // abajo = equipo B
-          scoreRaw: "",
+          top: { team: "A", pair: best.Ause[i] },
+          bottom: { team: "B", pair: best.Buse[i] },
+          scoreRaw: ""
         });
       }
 
@@ -144,16 +123,11 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
   }
 
   function allScoresComplete(turns) {
-    for (const t of turns) {
-      for (const m of t.matches) {
-        if (!parseScore(m.scoreRaw)) return false;
-      }
-    }
+    for (const t of turns) for (const m of t.matches) if (!parseScore(m.scoreRaw)) return false;
     return true;
   }
 
   function computeSummary(turns) {
-    // puntos por turno: 1,2,3...
     let totalA = 0;
     let totalB = 0;
     const perTurn = [];
@@ -167,7 +141,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         const sc = parseScore(m.scoreRaw);
         const win = winnerFromScore(sc);
         if (!win) continue;
-        if (win === "TOP") aPts += pts;
+        if (win === "A") aPts += pts;
         else bPts += pts;
       }
 
@@ -180,12 +154,10 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
   }
 
   async function ensureTeamsLoaded(dateISO) {
-    // Si ya hay equipos en memoria, usar
     const A = Store.state?.team_a || [];
     const B = Store.state?.team_b || [];
     if (A.length && B.length) return { A, B };
 
-    // si no, buscar en sessions por fecha (history detail)
     const detail = await getHistoryDetail(dateISO);
     const session = detail?.session;
     if (!session) throw new Error("No hay equipos guardados en esta fecha. Ve a Equipos y guarda primero.");
@@ -232,7 +204,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       </div>
 
       <div id="turnsTable"></div>
-
       <div id="turnsResults"></div>
     `;
 
@@ -246,11 +217,34 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       Store.setState({ session_date: e.target.value });
     });
 
-    const drawTurns = () => {
-      const table = $("turnsTable");
-      const results = $("turnsResults");
-      const btnSave = $("btnSaveTurns");
+    const table = $("turnsTable");
+    const results = $("turnsResults");
+    const btnSave = $("btnSaveTurns");
 
+    function updateResultsUI() {
+      if (!turnsState.length) {
+        results.innerHTML = "";
+        btnSave.disabled = true;
+        return;
+      }
+      const summary = computeSummary(turnsState);
+      results.innerHTML = `
+        <div class="card" style="margin-top:12px;">
+          <h3 style="margin:0 0 10px;">Resultados</h3>
+          <div class="hint ok" style="margin-bottom:8px;">
+            <b>Equipo A ${esc(summary.totalA)} puntos</b> • <b>Equipo B ${esc(summary.totalB)} puntos</b>
+          </div>
+          <div style="display:grid; gap:6px;">
+            ${summary.perTurn.map(pt => `
+              <div class="hint muted">Turno ${esc(pt.turn)}: A ${esc(pt.aPts)} • B ${esc(pt.bPts)}</div>
+            `).join("")}
+          </div>
+        </div>
+      `;
+      btnSave.disabled = !allScoresComplete(turnsState);
+    }
+
+    function drawTurnsUI() {
       if (!turnsState.length) {
         table.innerHTML = `<div class="card" style="margin-top:12px;"><div class="hint muted">Aún no hay turnos generados.</div></div>`;
         results.innerHTML = "";
@@ -258,11 +252,9 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         return;
       }
 
-      // tabla por turno
       table.innerHTML = turnsState.map(t => `
         <div class="card" style="margin-top:12px;">
           <h3 style="margin:0 0 10px;">Turno ${esc(t.turnIndex)} (${esc(courts)} canchas)</h3>
-
           <div style="overflow:auto;">
             <table style="width:100%; border-collapse:collapse;">
               <thead>
@@ -278,10 +270,9 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
                 ${t.matches.map((m, idx) => {
                   const top = m.top.pair;
                   const bot = m.bottom.pair;
-                  const scoreFmt = formatScoreDigits(m.scoreRaw);
                   const sc = parseScore(m.scoreRaw);
                   const win = winnerFromScore(sc);
-                  const winnerTxt = win ? (win === "TOP" ? "Ganador: Equipo A" : "Ganador: Equipo B") : "—";
+                  const winnerTxt = win ? (win === "A" ? "Ganador: Equipo A" : "Ganador: Equipo B") : "—";
 
                   return `
                     <tr>
@@ -292,21 +283,23 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
                       <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">
                         ${esc(bot[0]?.name)} / ${esc(bot[1]?.name)}
                       </td>
-
                       <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">
                         <input
                           inputmode="numeric"
                           maxlength="2"
                           data-score="${esc(t.turnIndex)}:${esc(idx)}"
-                          value="${esc(scoreFmt.replace("-", ""))}"
+                          value="${esc(scoreDigits(m.scoreRaw))}"
                           style="width:64px;"
                           placeholder="63"
                         />
-                        <span class="hint muted" style="margin-left:8px;">${esc(scoreFmt)}</span>
+                        <span class="hint muted" data-scorefmt="${esc(t.turnIndex)}:${esc(idx)}" style="margin-left:8px;">
+                          ${esc(formatScore(m.scoreRaw))}
+                        </span>
                       </td>
-
                       <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">
-                        <span class="hint ${win ? "ok" : "muted"}">${esc(winnerTxt)}</span>
+                        <span class="hint ${win ? "ok" : "muted"}" data-winner="${esc(t.turnIndex)}:${esc(idx)}">
+                          ${esc(winnerTxt)}
+                        </span>
                       </td>
                     </tr>
                   `;
@@ -317,56 +310,47 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         </div>
       `).join("");
 
-      // input handling (63 -> 6-3, backspace simple)
+      // Manejo fluido: NO render() en cada tecla
       table.querySelectorAll("[data-score]").forEach(inp => {
         inp.addEventListener("input", () => {
-          // mantener solo dígitos y máximo 2
-          const digits = String(inp.value || "").replace(/\D/g, "").slice(0, 2);
+          const digits = scoreDigits(inp.value);
           inp.value = digits;
 
-          const [tStr, mStr] = inp.getAttribute("data-score").split(":");
+          const key = inp.getAttribute("data-score");
+          const [tStr, mStr] = key.split(":");
           const tIndex = Number(tStr);
           const mIndex = Number(mStr);
 
           const turn = turnsState.find(x => Number(x.turnIndex) === tIndex);
           if (!turn) return;
 
-          turn.matches[mIndex].scoreRaw = digits; // guardamos dígitos, formateamos al mostrar
+          turn.matches[mIndex].scoreRaw = digits;
 
-          Store.setState({ turns: turnsState }); // dispara re-render parcial
-          render(); // simple y estable: re-render completo
+          // Actualizar formato + ganador en la fila (sin re-render)
+          const fmtEl = table.querySelector(`[data-scorefmt="${CSS.escape(key)}"]`);
+          if (fmtEl) fmtEl.textContent = formatScore(digits);
+
+          const sc = parseScore(digits);
+          const win = winnerFromScore(sc);
+          const winEl = table.querySelector(`[data-winner="${CSS.escape(key)}"]`);
+          if (winEl) {
+            winEl.textContent = win ? (win === "A" ? "Ganador: Equipo A" : "Ganador: Equipo B") : "—";
+            winEl.className = "hint " + (win ? "ok" : "muted");
+          }
+
+          // refrescar resumen + habilitación guardar
+          updateResultsUI();
         });
 
         inp.addEventListener("keydown", (e) => {
-          // evitar que Enter mueva pantalla
           if (e.key === "Enter") e.preventDefault();
         });
       });
 
-      // resultados abajo (tabla limpia)
-      const summary = computeSummary(turnsState);
+      updateResultsUI();
+    }
 
-      results.innerHTML = `
-        <div class="card" style="margin-top:12px;">
-          <h3 style="margin:0 0 10px;">Resultados</h3>
-
-          <div class="hint ok" style="margin-bottom:8px;">
-            <b>Equipo A ${esc(summary.totalA)} puntos</b> • <b>Equipo B ${esc(summary.totalB)} puntos</b>
-          </div>
-
-          <div style="display:grid; gap:6px;">
-            ${summary.perTurn.map(pt => `
-              <div class="hint muted">Turno ${esc(pt.turn)}: A ${esc(pt.aPts)} • B ${esc(pt.bPts)}</div>
-            `).join("")}
-          </div>
-        </div>
-      `;
-
-      // habilitar guardar si todo completo
-      btnSave.disabled = !allScoresComplete(turnsState);
-    };
-
-    drawTurns();
+    drawTurnsUI();
 
     $("btnGenTurns")?.addEventListener("click", async () => {
       try {
@@ -376,7 +360,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         const numTurns = Number($("turnCount")?.value || 3);
 
         const { A, B } = await ensureTeamsLoaded(dateISO);
-
         const gen = generateTurns(A, B, numTurns);
 
         Store.setState({
@@ -402,24 +385,20 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
         setStatus("Guardando resultados en historial…", "muted");
 
-        // payload para historial: turns + summary
         const summary = computeSummary(t);
 
-        // Guardamos "turns" con score como "63" (digits) y en history se formatea
         const turnsPayload = t.map(turn => ({
           turnIndex: turn.turnIndex,
           matches: turn.matches.map(m => ({
             court: m.court,
             top: { team: "A", pair: m.top.pair },
             bottom: { team: "B", pair: m.bottom.pair },
-            score: String(m.scoreRaw || "").replace(/\D/g, "").slice(0, 2)
+            score: scoreDigits(m.scoreRaw)
           }))
         }));
 
-        // scores opcional (por si luego lo usas)
         const scoresPayload = { generatedAt: new Date().toISOString() };
 
-        // summary esperado por history.js
         const summaryPayload = {
           totalA: summary.totalA,
           totalB: summary.totalB,
@@ -429,10 +408,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         await saveResultsToHistory(dateISO, turnsPayload, scoresPayload, summaryPayload);
 
         setStatus("✅ Resultados guardados. Ve a Historial.", "ok");
-
-        // refrescar historial si estás ahí
-        window.OP = window.OP || {};
-        if (typeof window.OP.refresh === "function") window.OP.refresh("turns");
       } catch (e) {
         console.error(e);
         setStatus(`❌ Error al guardar resultados: ${e?.message || e}`, "error");
@@ -440,7 +415,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     });
   }
 
-  // Integración con navegación modular
   window.OP = window.OP || {};
   const prev = window.OP.refresh;
   window.OP.refresh = (view) => {
