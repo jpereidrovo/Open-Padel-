@@ -298,3 +298,13 @@ tbody tr:hover{
   }
   .content{ padding: 12px; }
 }
+/* FIX: asegurar que los botones de auth siempre sean clickeables */
+#loginGoogle, #logoutBtn {
+  position: relative;
+  z-index: 50;
+  pointer-events: auto;
+}
+
+#authCard {
+  pointer-events: auto;
+}
