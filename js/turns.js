@@ -1,140 +1,195 @@
-// turns.js — Turnos + marcador 63→6-3 + puntos + guardar a Historial (FIX estado viejo)
+// turns.js — Generar turnos + ingresar marcadores + guardar a historial (results)
+
 import { Store } from "./store.js";
-import { saveResultsToHistory } from "./supabaseApi.js";
+import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
 (function () {
   const $ = (id) => document.getElementById(id);
-  const esc = (s) => String(s || "")
+  const esc = (s) => String(s ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 
-  const MAX_TURNS = 6;
-
-  function getTeams() {
-    const A = (Store.state?.team_a || []).slice();
-    const B = (Store.state?.team_b || []).slice();
-    return { A, B };
+  function todayISO() {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
   }
 
-  function validateTeams(A, B) {
-    const nA = A.length, nB = B.length;
-    if (!nA || !nB) return { ok: false, msg: "Arma Equipos A/B primero." };
-    if (nA !== nB) return { ok: false, msg: "Equipos deben tener el mismo número de jugadores." };
-    if ((nA + nB) % 4 !== 0) return { ok: false, msg: "Total de jugadores debe ser múltiplo de 4." };
-
-    const aD = A.filter(p => p.side === "D").length;
-    const aR = A.filter(p => p.side === "R").length;
-    const bD = B.filter(p => p.side === "D").length;
-    const bR = B.filter(p => p.side === "R").length;
-    if (aD !== aR) return { ok: false, msg: "Equipo A debe tener igual D y R." };
-    if (bD !== bR) return { ok: false, msg: "Equipo B debe tener igual D y R." };
-
-    return { ok: true, msg: "" };
+  function formatScoreDigits(raw) {
+    const digits = String(raw || "").replace(/\D/g, "").slice(0, 2);
+    if (digits.length === 0) return "";
+    if (digits.length === 1) return digits;
+    return `${digits[0]}-${digits[1]}`;
   }
 
-  function makePairs(team, shift) {
-    const rights = team.filter(p => p.side === "D").slice().sort((a,b)=> (b.rating||0)-(a.rating||0));
-    const lefts  = team.filter(p => p.side === "R").slice().sort((a,b)=> (b.rating||0)-(a.rating||0));
-    const m = Math.min(rights.length, lefts.length);
+  function parseScore(raw) {
+    const digits = String(raw || "").replace(/\D/g, "").slice(0, 2);
+    if (digits.length !== 2) return null;
+    const a = Number(digits[0]);
+    const b = Number(digits[1]);
+    if (Number.isNaN(a) || Number.isNaN(b)) return null;
+    if (a < 0 || a > 7 || b < 0 || b > 7) return null;
+    if (a === b) return null; // no empates
+    return { a, b, digits };
+  }
+
+  function winnerFromScore(scoreObj) {
+    if (!scoreObj) return null;
+    return scoreObj.a > scoreObj.b ? "TOP" : "BOTTOM";
+  }
+
+  // Crea parejas dentro de un equipo: siempre 1 D + 1 R
+  function buildPairs(teamPlayers) {
+    const D = teamPlayers.filter(p => p.side === "D").sort((a,b)=>Number(b.rating)-Number(a.rating));
+    const R = teamPlayers.filter(p => p.side === "R").sort((a,b)=>Number(b.rating)-Number(a.rating));
     const pairs = [];
-    for (let i=0; i<m; i++) {
-      pairs.push({ r: rights[i], l: lefts[(i + shift) % m] });
+    const n = Math.min(D.length, R.length);
+    for (let i = 0; i < n; i++) {
+      pairs.push([D[i], R[i]]);
     }
     return pairs;
   }
 
-  function generateTurns(turnCount) {
-    const { A, B } = getTeams();
-    const m = A.length / 2; // canchas
+  // Genera cruces A vs B por canchas para un turno, intentando evitar repetir parejas A o B entre turnos
+  function generateTurns(teamA, teamB, numTurns) {
+    const pairsA = buildPairs(teamA);
+    const pairsB = buildPairs(teamB);
+
+    const courts = Math.min(pairsA.length, pairsB.length);
+    if (courts <= 0) throw new Error("Equipos incompletos para armar parejas.");
+
+    // helper shuffle
+    const shuffle = (arr) => {
+      const a = arr.slice();
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    };
+
+    // para evitar repeticiones exactas de parejas dentro del mismo equipo en turnos
+    // (siempre serán las mismas parejas si buildPairs es fijo; por eso hacemos “re-parejas” por turno)
+    // estrategia: remezclar D y R dentro de cada equipo por turno
     const turns = [];
+    const usedPairsA = new Set(); // "id1-id2"
+    const usedPairsB = new Set();
 
-    for (let t=0; t<turnCount; t++) {
-      const pairsA = makePairs(A, t);
-      const pairsB = makePairs(B, t);
+    const pairKey = (p) => {
+      const ids = [p[0].id, p[1].id].sort();
+      return ids.join("-");
+    };
 
+    for (let t = 1; t <= numTurns; t++) {
+      // intentar varias veces para no repetir parejas internas
+      let best = null;
+
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const AD = shuffle(teamA.filter(p => p.side === "D"));
+        const AR = shuffle(teamA.filter(p => p.side === "R"));
+        const BD = shuffle(teamB.filter(p => p.side === "D"));
+        const BR = shuffle(teamB.filter(p => p.side === "R"));
+
+        const nA = Math.min(AD.length, AR.length);
+        const nB = Math.min(BD.length, BR.length);
+
+        const candPairsA = [];
+        const candPairsB = [];
+
+        for (let i = 0; i < nA; i++) candPairsA.push([AD[i], AR[i]]);
+        for (let i = 0; i < nB; i++) candPairsB.push([BD[i], BR[i]]);
+
+        // recorta al número de canchas
+        const Ause = candPairsA.slice(0, courts);
+        const Buse = candPairsB.slice(0, courts);
+
+        // score attempt: cuántas parejas nuevas logra
+        let newCount = 0;
+        for (const p of Ause) if (!usedPairsA.has(pairKey(p))) newCount++;
+        for (const p of Buse) if (!usedPairsB.has(pairKey(p))) newCount++;
+
+        if (!best || newCount > best.newCount) {
+          best = { Ause, Buse, newCount };
+          if (newCount === courts * 2) break;
+        }
+      }
+
+      const Ause = best.Ause;
+      const Buse = best.Buse;
+
+      // guarda como usadas
+      for (const p of Ause) usedPairsA.add(pairKey(p));
+      for (const p of Buse) usedPairsB.add(pairKey(p));
+
+      // arma matches (cancha i): pareja A vs pareja B
       const matches = [];
-      for (let c=0; c<m; c++) {
-        const a = pairsA[c];
-        const b = pairsB[c];
+      for (let i = 0; i < courts; i++) {
         matches.push({
-          court: c + 1,
-          top: { team: "A", pair: [mini(a.r), mini(a.l)] },
-          bottom: { team: "B", pair: [mini(b.r), mini(b.l)] },
-          score: "" // raw "63"
+          court: i + 1,
+          top: { team: "A", pair: Ause[i] },     // arriba = equipo A
+          bottom: { team: "B", pair: Buse[i] },  // abajo = equipo B
+          scoreRaw: "",
         });
       }
 
-      turns.push({ turnIndex: t + 1, pointsPerWin: t + 1, matches });
+      turns.push({ turnIndex: t, matches });
     }
 
-    return turns;
-
-    function mini(p){ return { id:p.id, name:p.name, side:p.side, rating:p.rating }; }
+    return { courts, turns };
   }
 
-  // ✅ acepta "63" y también tolera que alguien haya guardado "6-3"
-  function normalizeScore(raw) {
-    if (!raw) return "";
-    const d = String(raw).replace(/\D/g, "").slice(0,2);
-    return d;
-  }
-
-  function isCompleteScore(raw) {
-    const d = normalizeScore(raw);
-    return /^[0-7]{2}$/.test(d);
-  }
-
-  function formatScore(raw) {
-    const d = normalizeScore(raw);
-    if (!d) return "";
-    if (d.length === 1) return d;
-    return `${d[0]}-${d[1]}`;
-  }
-
-  function winnerFromScore(raw) {
-    const d = normalizeScore(raw);
-    if (!/^[0-7]{2}$/.test(d)) return null;
-    const a = Number(d[0]);
-    const b = Number(d[1]);
-    if (a === b) return null;
-    return a > b ? "A" : "B";
-  }
-
-  function computeSummary(turns) {
-    const perTurn = [];
-    let totalA = 0, totalB = 0;
-
-    for (const t of turns) {
-      let aPts = 0, bPts = 0;
-      for (const m of t.matches) {
-        const w = winnerFromScore(m.score);
-        if (!w) continue;
-        if (w === "A") aPts += t.pointsPerWin;
-        else bPts += t.pointsPerWin;
-      }
-      totalA += aPts;
-      totalB += bPts;
-      perTurn.push({ turn: t.turnIndex, aPts, bPts });
-    }
-
-    return { perTurn, totalA, totalB };
-  }
-
-  function allScoresFilled(turns) {
+  function allScoresComplete(turns) {
     for (const t of turns) {
       for (const m of t.matches) {
-        if (!isCompleteScore(m.score)) return false;
+        if (!parseScore(m.scoreRaw)) return false;
       }
     }
     return true;
   }
 
-  function shouldSkipRenderBecauseTyping() {
-    const el = document.activeElement;
-    return el && el.classList && el.classList.contains("score-input");
+  function computeSummary(turns) {
+    // puntos por turno: 1,2,3...
+    let totalA = 0;
+    let totalB = 0;
+    const perTurn = [];
+
+    for (const t of turns) {
+      const pts = Number(t.turnIndex || 1);
+      let aPts = 0;
+      let bPts = 0;
+
+      for (const m of t.matches) {
+        const sc = parseScore(m.scoreRaw);
+        const win = winnerFromScore(sc);
+        if (!win) continue;
+        if (win === "TOP") aPts += pts;
+        else bPts += pts;
+      }
+
+      totalA += aPts;
+      totalB += bPts;
+      perTurn.push({ turn: t.turnIndex, aPts, bPts });
+    }
+
+    return { totalA, totalB, perTurn };
+  }
+
+  async function ensureTeamsLoaded(dateISO) {
+    // Si ya hay equipos en memoria, usar
+    const A = Store.state?.team_a || [];
+    const B = Store.state?.team_b || [];
+    if (A.length && B.length) return { A, B };
+
+    // si no, buscar en sessions por fecha (history detail)
+    const detail = await getHistoryDetail(dateISO);
+    const session = detail?.session;
+    if (!session) throw new Error("No hay equipos guardados en esta fecha. Ve a Equipos y guarda primero.");
+    return { A: session.team_a || [], B: session.team_b || [] };
   }
 
   function render() {
@@ -146,254 +201,246 @@ import { saveResultsToHistory } from "./supabaseApi.js";
       return;
     }
 
-    const { A, B } = getTeams();
-    const v = validateTeams(A, B);
-
-    const turnCount = Math.min(Number(Store.state?.turnCount || 3), MAX_TURNS);
-
-    const turns = Array.isArray(Store.state?.turns) ? Store.state.turns : null;
-    const summary = turns ? computeSummary(turns) : null;
+    const date = Store.state?.session_date || todayISO();
+    const turnsState = Array.isArray(Store.state?.turns) ? Store.state.turns : [];
+    const courts = Store.state?.courts || 0;
 
     mount.innerHTML = `
       <div class="card" style="margin-top:10px;">
-        <div style="display:flex; gap:10px; justify-content:space-between; flex-wrap:wrap; align-items:end;">
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:end; justify-content:space-between;">
           <div>
-            <div class="hint ${v.ok ? "ok" : "warn"}">${v.ok ? "✅ Equipos listos para generar turnos" : "⚠️ " + v.msg}</div>
-            <div class="hint muted" style="margin-top:6px;">
-              Canchas: <b>${v.ok ? (A.length/2) : 0}</b> • Jugadores: <b>${v.ok ? (A.length+B.length) : 0}</b>
+            <label>Fecha</label>
+            <input id="turnsDate" type="date" value="${esc(date)}" />
+          </div>
+
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+            <div>
+              <label>Turnos</label>
+              <select id="turnCount">
+                ${[1,2,3,4].map(n => `<option value="${n}" ${n===3?"selected":""}>${n}</option>`).join("")}
+              </select>
+            </div>
+
+            <div class="btns">
+              <button class="ghost" id="btnGenTurns">Generar turnos</button>
+              <button class="primary" id="btnSaveTurns" disabled>Guardar resultados</button>
             </div>
           </div>
-          <div class="btns">
-            <label class="hint muted" style="margin-right:6px;">Turnos</label>
-            <select id="turnCountSel">
-              ${Array.from({length:MAX_TURNS},(_,i)=>i+1).map(n => `<option value="${n}" ${n===turnCount?"selected":""}>${n}</option>`).join("")}
-            </select>
-            <button class="primary" id="genTurns" ${v.ok ? "" : "disabled"}>Generar</button>
-            <button class="ghost" id="clearTurns" ${turns ? "" : "disabled"}>Limpiar</button>
-            <button class="ghost" id="saveTurns" ${turns && allScoresFilled(turns) ? "" : "disabled"}>Guardar resultados</button>
-          </div>
         </div>
-        <div id="turnsStatus" class="hint" style="margin-top:10px;"></div>
+
+        <div id="turnsStatus" class="hint muted" style="margin-top:10px;"></div>
       </div>
 
-      ${turns ? renderTurnsTable(turns) : `
-        <div class="card" style="margin-top:12px;">
-          <div class="hint muted">Genera turnos para ver los cruces.</div>
-        </div>
-      `}
+      <div id="turnsTable"></div>
 
-      ${turns ? renderResults(summary) : ""}
+      <div id="turnsResults"></div>
     `;
 
     const statusEl = $("turnsStatus");
-    const setStatus = (m,k="") => { if(!statusEl) return; statusEl.textContent=m||""; statusEl.className="hint "+k; };
+    const setStatus = (msg, cls="muted") => {
+      statusEl.textContent = msg || "";
+      statusEl.className = "hint " + cls;
+    };
 
-    $("turnCountSel")?.addEventListener("change", (e) => {
-      const n = Math.min(Number(e.target.value || 3), MAX_TURNS);
-      Store.setState({ turnCount: n });
-      if (!shouldSkipRenderBecauseTyping()) render();
+    $("turnsDate")?.addEventListener("change", (e) => {
+      Store.setState({ session_date: e.target.value });
     });
 
-    $("genTurns")?.addEventListener("click", () => {
-      const n = Math.min(Number($("turnCountSel")?.value || 3), MAX_TURNS);
-      const newTurns = generateTurns(n);
-      Store.setState({ turns: newTurns, summary: null, turnCount: n });
-      setStatus("✅ Turnos generados. Ingresa marcadores.", "ok");
-      render();
-    });
+    const drawTurns = () => {
+      const table = $("turnsTable");
+      const results = $("turnsResults");
+      const btnSave = $("btnSaveTurns");
 
-    $("clearTurns")?.addEventListener("click", () => {
-      Store.setState({ turns: null, summary: null });
-      setStatus("✅ Turnos limpiados.", "ok");
-      render();
-    });
-
-    // Inputs
-    mount.querySelectorAll(".score-input").forEach((inp) => {
-      const tIdx = Number(inp.getAttribute("data-t"));
-      const mIdx = Number(inp.getAttribute("data-m"));
-
-      // sincroniza dataset.raw con lo que hay en estado
-      inp.dataset.raw = normalizeScore(inp.value);
-
-      inp.addEventListener("keydown", (ev) => {
-        const raw = inp.dataset.raw || "";
-
-        if (ev.key === "Backspace") {
-          ev.preventDefault();
-          const next = raw.slice(0, -1);
-          inp.dataset.raw = next;
-          inp.value = formatScore(next);
-          updateScoreInState(tIdx, mIdx, next);
-          updateLiveUI();
-          return;
-        }
-
-        if (ev.key === "Tab" || ev.key.startsWith("Arrow")) return;
-
-        if (/^[0-7]$/.test(ev.key)) {
-          ev.preventDefault();
-          if (raw.length >= 2) return;
-          const next = raw + ev.key;
-          inp.dataset.raw = next;
-          inp.value = formatScore(next);
-          updateScoreInState(tIdx, mIdx, next);
-          updateLiveUI();
-          return;
-        }
-
-        if (ev.key.length === 1) ev.preventDefault();
-      });
-
-      inp.addEventListener("paste", (ev) => {
-        ev.preventDefault();
-        const text = (ev.clipboardData || window.clipboardData).getData("text");
-        const digits = normalizeScore(text).replace(/[8-9]/g,"").slice(0,2);
-        inp.dataset.raw = digits;
-        inp.value = formatScore(digits);
-        updateScoreInState(tIdx, mIdx, digits);
-        updateLiveUI();
-      });
-    });
-
-    // ✅ FIX: al guardar, leer SIEMPRE el estado actual (no el `turns` del render)
-    $("saveTurns")?.addEventListener("click", async () => {
-      try {
-        const latestTurns = Array.isArray(Store.state?.turns) ? Store.state.turns : null;
-        if (!latestTurns) return;
-
-        if (!allScoresFilled(latestTurns)) {
-          setStatus("⚠️ Completa todos los marcadores antes de guardar.", "warn");
-          return;
-        }
-
-        const date = Store.state?.session_date || new Date().toISOString().slice(0,10);
-        const summaryNow = computeSummary(latestTurns);
-
-        Store.setState({ summary: summaryNow });
-
-        await saveResultsToHistory(date, latestTurns, null, summaryNow);
-
-        setStatus("✅ Resultados guardados en Historial.", "ok");
-      } catch (e) {
-        console.error(e);
-        setStatus("❌ Error al guardar resultados.", "error");
+      if (!turnsState.length) {
+        table.innerHTML = `<div class="card" style="margin-top:12px;"><div class="hint muted">Aún no hay turnos generados.</div></div>`;
+        results.innerHTML = "";
+        btnSave.disabled = true;
+        return;
       }
-    });
 
-    function updateScoreInState(turnIndex1based, matchIndex0, raw) {
-      const cur = Array.isArray(Store.state?.turns) ? Store.state.turns : null;
-      if (!cur) return;
+      // tabla por turno
+      table.innerHTML = turnsState.map(t => `
+        <div class="card" style="margin-top:12px;">
+          <h3 style="margin:0 0 10px;">Turno ${esc(t.turnIndex)} (${esc(courts)} canchas)</h3>
 
-      const next = cur.map(t => ({
-        ...t,
-        matches: t.matches.map(m => ({ ...m }))
-      }));
+          <div style="overflow:auto;">
+            <table style="width:100%; border-collapse:collapse;">
+              <thead>
+                <tr class="hint muted">
+                  <th style="text-align:left; padding:8px;">Cancha</th>
+                  <th style="text-align:left; padding:8px;">Equipo A (arriba)</th>
+                  <th style="text-align:left; padding:8px;">Equipo B (abajo)</th>
+                  <th style="text-align:left; padding:8px;">Marcador</th>
+                  <th style="text-align:left; padding:8px;">Ganador</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${t.matches.map((m, idx) => {
+                  const top = m.top.pair;
+                  const bot = m.bottom.pair;
+                  const scoreFmt = formatScoreDigits(m.scoreRaw);
+                  const sc = parseScore(m.scoreRaw);
+                  const win = winnerFromScore(sc);
+                  const winnerTxt = win ? (win === "TOP" ? "Ganador: Equipo A" : "Ganador: Equipo B") : "—";
 
-      const t = next.find(x => x.turnIndex === turnIndex1based);
-      if (!t) return;
-      const m = t.matches[matchIndex0];
-      if (!m) return;
-      m.score = normalizeScore(raw);
+                  return `
+                    <tr>
+                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">#${esc(m.court)}</td>
+                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">
+                        ${esc(top[0]?.name)} / ${esc(top[1]?.name)}
+                      </td>
+                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">
+                        ${esc(bot[0]?.name)} / ${esc(bot[1]?.name)}
+                      </td>
 
-      Store.setState({ turns: next });
-    }
+                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">
+                        <input
+                          inputmode="numeric"
+                          maxlength="2"
+                          data-score="${esc(t.turnIndex)}:${esc(idx)}"
+                          value="${esc(scoreFmt.replace("-", ""))}"
+                          style="width:64px;"
+                          placeholder="63"
+                        />
+                        <span class="hint muted" style="margin-left:8px;">${esc(scoreFmt)}</span>
+                      </td>
 
-    function updateLiveUI() {
-      const cur = Array.isArray(Store.state?.turns) ? Store.state.turns : null;
-      if (!cur) return;
+                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">
+                        <span class="hint ${win ? "ok" : "muted"}">${esc(winnerTxt)}</span>
+                      </td>
+                    </tr>
+                  `;
+                }).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `).join("");
 
-      cur.forEach((t) => {
-        t.matches.forEach((m, mi) => {
-          const w = winnerFromScore(m.score);
-          const badge = mount.querySelector(`[data-win="${t.turnIndex}-${mi}"]`);
-          if (badge) {
-            badge.textContent = w ? `Ganador: Equipo ${w}` : "";
-            badge.className = "hint " + (w ? "ok" : "muted");
-          }
+      // input handling (63 -> 6-3, backspace simple)
+      table.querySelectorAll("[data-score]").forEach(inp => {
+        inp.addEventListener("input", () => {
+          // mantener solo dígitos y máximo 2
+          const digits = String(inp.value || "").replace(/\D/g, "").slice(0, 2);
+          inp.value = digits;
+
+          const [tStr, mStr] = inp.getAttribute("data-score").split(":");
+          const tIndex = Number(tStr);
+          const mIndex = Number(mStr);
+
+          const turn = turnsState.find(x => Number(x.turnIndex) === tIndex);
+          if (!turn) return;
+
+          turn.matches[mIndex].scoreRaw = digits; // guardamos dígitos, formateamos al mostrar
+
+          Store.setState({ turns: turnsState }); // dispara re-render parcial
+          render(); // simple y estable: re-render completo
+        });
+
+        inp.addEventListener("keydown", (e) => {
+          // evitar que Enter mueva pantalla
+          if (e.key === "Enter") e.preventDefault();
         });
       });
 
-      const saveBtn = $("saveTurns");
-      if (saveBtn) saveBtn.disabled = !allScoresFilled(cur);
+      // resultados abajo (tabla limpia)
+      const summary = computeSummary(turnsState);
 
-      const summaryNow = computeSummary(cur);
-      const totalEl = $("overallTotals");
-      if (totalEl) totalEl.textContent = `Equipo A ${summaryNow.totalA} puntos • Equipo B ${summaryNow.totalB} puntos`;
+      results.innerHTML = `
+        <div class="card" style="margin-top:12px;">
+          <h3 style="margin:0 0 10px;">Resultados</h3>
 
-      summaryNow.perTurn.forEach((pt) => {
-        const row = mount.querySelector(`[data-pt="${pt.turn}"]`);
-        if (row) row.textContent = `Turno ${pt.turn}: A ${pt.aPts} • B ${pt.bPts}`;
-      });
-    }
-  }
-
-  function renderTurnsTable(turns) {
-    return `
-      <div class="card" style="margin-top:12px;">
-        ${turns.map(t => `
-          <div class="card" style="background: rgba(0,0,0,.12); margin-bottom:10px;">
-            <h3 style="margin:0;">Turno ${t.turnIndex} <span class="hint muted">(cada victoria vale ${t.pointsPerWin} punto${t.pointsPerWin>1?"s":""})</span></h3>
-
-            <div style="overflow:auto; margin-top:10px;">
-              <table style="width:100%; border-collapse:collapse;">
-                <thead>
-                  <tr class="hint muted">
-                    <th style="text-align:left; padding:8px;">Cancha</th>
-                    <th style="text-align:left; padding:8px;">Equipo A</th>
-                    <th style="text-align:left; padding:8px;">Equipo B</th>
-                    <th style="text-align:left; padding:8px;">Marcador</th>
-                    <th style="text-align:left; padding:8px;">Resultado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${t.matches.map((m, mi) => `
-                    <tr>
-                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">#${m.court}</td>
-                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">
-                        ${esc(m.top.pair[0].name)} / ${esc(m.top.pair[1].name)}
-                      </td>
-                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">
-                        ${esc(m.bottom.pair[0].name)} / ${esc(m.bottom.pair[1].name)}
-                      </td>
-                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">
-                        <input class="score-input"
-                          inputmode="numeric"
-                          placeholder="63"
-                          data-t="${t.turnIndex}"
-                          data-m="${mi}"
-                          value="${esc(formatScore(m.score))}"
-                          style="width:90px; padding:8px; border-radius:10px; border:1px solid rgba(255,255,255,.18); background:rgba(0,0,0,.25); color:#eef2ff;">
-                      </td>
-                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">
-                        <span class="hint muted" data-win="${t.turnIndex}-${mi}"></span>
-                      </td>
-                    </tr>
-                  `).join("")}
-                </tbody>
-              </table>
-            </div>
+          <div class="hint ok" style="margin-bottom:8px;">
+            <b>Equipo A ${esc(summary.totalA)} puntos</b> • <b>Equipo B ${esc(summary.totalB)} puntos</b>
           </div>
-        `).join("")}
-      </div>
-    `;
-  }
 
-  function renderResults(summary) {
-    if (!summary) summary = { perTurn: [], totalA: 0, totalB: 0 };
-    return `
-      <div class="card" style="margin-top:12px;">
-        <h3 style="margin:0 0 10px;">Resultados</h3>
-        <div id="overallTotals" class="hint ok"><b>Equipo A ${summary.totalA} puntos</b> • <b>Equipo B ${summary.totalB} puntos</b></div>
-        <div style="margin-top:10px; display:grid; gap:6px;">
-          ${summary.perTurn.map(pt => `
-            <div class="hint muted" data-pt="${pt.turn}">Turno ${pt.turn}: A ${pt.aPts} • B ${pt.bPts}</div>
-          `).join("")}
+          <div style="display:grid; gap:6px;">
+            ${summary.perTurn.map(pt => `
+              <div class="hint muted">Turno ${esc(pt.turn)}: A ${esc(pt.aPts)} • B ${esc(pt.bPts)}</div>
+            `).join("")}
+          </div>
         </div>
-      </div>
-    `;
+      `;
+
+      // habilitar guardar si todo completo
+      btnSave.disabled = !allScoresComplete(turnsState);
+    };
+
+    drawTurns();
+
+    $("btnGenTurns")?.addEventListener("click", async () => {
+      try {
+        setStatus("Generando turnos…", "muted");
+
+        const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
+        const numTurns = Number($("turnCount")?.value || 3);
+
+        const { A, B } = await ensureTeamsLoaded(dateISO);
+
+        const gen = generateTurns(A, B, numTurns);
+
+        Store.setState({
+          session_date: dateISO,
+          courts: gen.courts,
+          turns: gen.turns
+        });
+
+        setStatus("✅ Turnos generados. Completa marcadores para guardar.", "ok");
+        render();
+      } catch (e) {
+        console.error(e);
+        setStatus(`❌ ${e?.message || e}`, "error");
+      }
+    });
+
+    $("btnSaveTurns")?.addEventListener("click", async () => {
+      try {
+        const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
+        const t = Array.isArray(Store.state?.turns) ? Store.state.turns : [];
+        if (!t.length) throw new Error("No hay turnos para guardar.");
+        if (!allScoresComplete(t)) throw new Error("Completa todos los marcadores (2 dígitos 0–7, sin empates).");
+
+        setStatus("Guardando resultados en historial…", "muted");
+
+        // payload para historial: turns + summary
+        const summary = computeSummary(t);
+
+        // Guardamos "turns" con score como "63" (digits) y en history se formatea
+        const turnsPayload = t.map(turn => ({
+          turnIndex: turn.turnIndex,
+          matches: turn.matches.map(m => ({
+            court: m.court,
+            top: { team: "A", pair: m.top.pair },
+            bottom: { team: "B", pair: m.bottom.pair },
+            score: String(m.scoreRaw || "").replace(/\D/g, "").slice(0, 2)
+          }))
+        }));
+
+        // scores opcional (por si luego lo usas)
+        const scoresPayload = { generatedAt: new Date().toISOString() };
+
+        // summary esperado por history.js
+        const summaryPayload = {
+          totalA: summary.totalA,
+          totalB: summary.totalB,
+          perTurn: summary.perTurn
+        };
+
+        await saveResultsToHistory(dateISO, turnsPayload, scoresPayload, summaryPayload);
+
+        setStatus("✅ Resultados guardados. Ve a Historial.", "ok");
+
+        // refrescar historial si estás ahí
+        window.OP = window.OP || {};
+        if (typeof window.OP.refresh === "function") window.OP.refresh("turns");
+      } catch (e) {
+        console.error(e);
+        setStatus(`❌ Error al guardar resultados: ${e?.message || e}`, "error");
+      }
+    });
   }
 
+  // Integración con navegación modular
   window.OP = window.OP || {};
   const prev = window.OP.refresh;
   window.OP.refresh = (view) => {
@@ -402,7 +449,5 @@ import { saveResultsToHistory } from "./supabaseApi.js";
   };
 
   window.addEventListener("op:storeReady", render);
-  window.addEventListener("op:playersChanged", () => { if (!document.hidden && !document.activeElement?.classList?.contains("score-input")) render(); });
-  window.addEventListener("op:stateChanged", () => { if (!document.hidden && !document.activeElement?.classList?.contains("score-input")) render(); });
   document.addEventListener("DOMContentLoaded", render);
 })();
