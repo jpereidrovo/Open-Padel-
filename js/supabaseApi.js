@@ -1,39 +1,56 @@
-// supabaseApi.js — API única para Supabase (auth + players + history)
-// Copiar/pegar completo. No editar nombres de exports.
+// supabaseApi.js — API única para Open Padel (Supabase)
+// Incluye: Auth Google (redirect GitHub Pages), Players CRUD, Sessions (equipos), Results (turnos), History + delete
 
 import { supabase } from "./supabaseClient.js";
 
 export const GROUP_CODE = "open-padel";
 
-/* --------------------- HELPERS --------------------- */
+// ---- Helpers ----
+function cleanDate(d) {
+  return String(d || "").slice(0, 10);
+}
 
-function toISODate(d) {
-  return String(d || "").slice(0, 10); // YYYY-MM-DD
+export async function getSessionUser() {
+  // Siempre intentar leer sesión local primero
+  const { data: s1, error: e1 } = await supabase.auth.getSession();
+  if (e1) throw e1;
+  if (s1?.session?.user) return s1.session.user;
+
+  // Si no hay, pedir user (a veces se resuelve aquí)
+  const { data: u, error: e2 } = await supabase.auth.getUser();
+  if (e2) return null;
+  return u?.user || null;
 }
 
 export async function requireSession() {
-  const { data, error } = await supabase.auth.getSession();
-  if (error) throw error;
-  const session = data?.session;
-  if (!session) throw new Error("No hay sesión. Inicia sesión con Google.");
-  return session;
+  const user = await getSessionUser();
+  if (!user) throw new Error("No hay sesión. Inicia sesión con Google.");
+  return user;
 }
 
-/* --------------------- AUTH --------------------- */
-
+// ---- AUTH ----
 export async function signInWithGoogle() {
-  // GitHub Pages: mantener origin + pathname del repo
+  // ✅ Muy importante en GitHub Pages:
+  // window.location.origin + window.location.pathname => https://usuario.github.io/repo/
+  // Esto evita errores por rutas y hace que vuelva a tu app
   const redirectTo = window.location.origin + window.location.pathname;
 
-  const { error } = await supabase.auth.signInWithOAuth({
+  const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
       redirectTo,
-      queryParams: { prompt: "select_account" }
+      queryParams: {
+        access_type: "offline",
+        prompt: "consent"
+      }
     }
   });
 
   if (error) throw error;
+
+  // Nota: en redirect flow, normalmente navegará automáticamente.
+  // data.url existe si quieres redirigir manualmente, pero supabase lo hace.
+  return data;
 }
 
 export async function signOut() {
@@ -41,30 +58,15 @@ export async function signOut() {
   if (error) throw error;
 }
 
-export async function getSessionUser() {
-  const { data, error } = await supabase.auth.getUser();
-  if (error) throw error;
-  return data?.user || null;
-}
-
-/* --------------------- PLAYERS --------------------- */
-/*
-Tabla esperada: public.players
-- id uuid (default gen_random_uuid())
-- name text not null
-- side text not null  ('D' o 'R')
-- rating numeric(3,1) o integer (si aún no migraste)
-- group_code text default 'open-padel'
-*/
-
+// ---- PLAYERS ----
 export async function listPlayers() {
   await requireSession();
 
   const { data, error } = await supabase
     .from("players")
-    .select("id,name,side,rating,created_at,updated_at,group_code")
+    .select("*")
     .eq("group_code", GROUP_CODE)
-    .order("name", { ascending: true });
+    .order("created_at", { ascending: true });
 
   if (error) throw error;
   return data || [];
@@ -74,19 +76,22 @@ export async function upsertPlayer(player) {
   await requireSession();
 
   const payload = {
+    id: player.id,
+    name: String(player.name || "").trim(),
+    side: player.side === "R" ? "R" : "D",
+    // rating puede ser 0.5, 1.0, 1.5...
+    rating: Number(player.rating),
     group_code: GROUP_CODE,
-    id: player?.id || undefined, // si no hay id, supabase genera
-    name: String(player?.name || "").trim(),
-    side: player?.side === "R" ? "R" : "D",
-    // rating puede ser decimal (0.5) si migraste la tabla
-    rating: Number(player?.rating ?? 5),
     updated_at: new Date().toISOString()
   };
 
-  if (!payload.name) throw new Error("Nombre vacío.");
-  if (payload.rating < 0 || payload.rating > 10) throw new Error("Rating fuera de rango (0-10).");
+  // No mandar id si es nuevo
+  if (!payload.id) delete payload.id;
 
-  const { error } = await supabase.from("players").upsert(payload);
+  const { error } = await supabase
+    .from("players")
+    .upsert(payload, { onConflict: "id" });
+
   if (error) throw error;
 }
 
@@ -113,31 +118,22 @@ export async function deleteAllPlayers() {
   if (error) throw error;
 }
 
-/* --------------------- HISTORY: SESSIONS (Equipos) --------------------- */
-/*
-Tabla esperada: public.sessions
-- group_code text
-- session_date date
-- totalPlayers integer
-- team_a jsonb
-- team_b jsonb
-UNIQUE (group_code, session_date)
-*/
-
-export async function saveTeamsToHistory(session_date, totalPlayers, team_a, team_b) {
+// ---- SESSIONS (Equipos) ----
+export async function saveTeamsToHistory(session_date, totalPlayers, teamA, teamB) {
   await requireSession();
 
-  const date = toISODate(session_date);
+  const date = cleanDate(session_date);
 
   const payload = {
     group_code: GROUP_CODE,
     session_date: date,
     totalPlayers: Number(totalPlayers || 0),
-    team_a: team_a || [],
-    team_b: team_b || [],
+    team_a: teamA || [],
+    team_b: teamB || [],
     updated_at: new Date().toISOString()
   };
 
+  // upsert por unique(group_code, session_date)
   const { error } = await supabase
     .from("sessions")
     .upsert(payload, { onConflict: "group_code,session_date" });
@@ -145,9 +141,34 @@ export async function saveTeamsToHistory(session_date, totalPlayers, team_a, tea
   if (error) throw error;
 }
 
+// ---- RESULTS (Turnos + Summary) ----
+export async function saveResultsToHistory(session_date, turns, scores, summary) {
+  await requireSession();
+
+  const date = cleanDate(session_date);
+
+  const payload = {
+    group_code: GROUP_CODE,
+    session_date: date,
+    turns: turns || [],
+    scores: scores || {},
+    summary: summary || {},
+    updated_at: new Date().toISOString()
+  };
+
+  // upsert por unique(group_code, session_date)
+  const { error } = await supabase
+    .from("results")
+    .upsert(payload, { onConflict: "group_code,session_date" });
+
+  if (error) throw error;
+}
+
+// ---- HISTORY ----
 export async function listHistoryDates() {
   await requireSession();
 
+  // Tomamos fechas desde sessions (es la “base” del historial)
   const { data, error } = await supabase
     .from("sessions")
     .select("session_date")
@@ -158,60 +179,57 @@ export async function listHistoryDates() {
   return data || [];
 }
 
-/* --------------------- HISTORY: RESULTS (Turnos + resumen) --------------------- */
-/*
-Tabla esperada: public.results
-- group_code text
-- session_date date
-- turns jsonb
-- scores jsonb (opcional)
-- summary jsonb
-UNIQUE (group_code, session_date)
-*/
-
-export async function saveResultsToHistory(session_date, turns, scores, summary) {
-  await requireSession();
-
-  const date = toISODate(session_date);
-
-  const payload = {
-    group_code: GROUP_CODE,
-    session_date: date,
-    turns: turns || null,
-    scores: scores || null,
-    summary: summary || null,
-    updated_at: new Date().toISOString()
-  };
-
-  const { error } = await supabase
-    .from("results")
-    .upsert(payload, { onConflict: "group_code,session_date" });
-
-  if (error) throw error;
-}
-
 export async function getHistoryDetail(session_date) {
   await requireSession();
 
-  const date = toISODate(session_date);
+  const date = cleanDate(session_date);
 
-  const { data: sessionRow, error: e1 } = await supabase
+  const { data: sessions, error: e1 } = await supabase
     .from("sessions")
     .select("*")
     .eq("group_code", GROUP_CODE)
     .eq("session_date", date)
-    .maybeSingle();
+    .limit(1);
 
   if (e1) throw e1;
 
-  const { data: resultsRow, error: e2 } = await supabase
+  const session = (sessions && sessions[0]) ? sessions[0] : null;
+
+  const { data: resultsRows, error: e2 } = await supabase
     .from("results")
     .select("*")
     .eq("group_code", GROUP_CODE)
     .eq("session_date", date)
-    .maybeSingle();
+    .limit(1);
 
   if (e2) throw e2;
 
-  return { session: sessionRow || null, results: resultsRow || null };
+  const results = (resultsRows && resultsRows[0]) ? resultsRows[0] : null;
+
+  return { session, results };
+}
+
+// ---- DELETE HISTORY DATE ----
+export async function deleteHistoryDate(session_date) {
+  await requireSession();
+
+  const date = cleanDate(session_date);
+
+  // borrar results primero
+  const { error: e1 } = await supabase
+    .from("results")
+    .delete()
+    .eq("group_code", GROUP_CODE)
+    .eq("session_date", date);
+
+  if (e1) throw e1;
+
+  // borrar sessions (esto elimina la fecha del historial)
+  const { error: e2 } = await supabase
+    .from("sessions")
+    .delete()
+    .eq("group_code", GROUP_CODE)
+    .eq("session_date", date);
+
+  if (e2) throw e2;
 }
