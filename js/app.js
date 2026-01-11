@@ -1,30 +1,22 @@
-// app.js — Bootstrap principal Open Padel (estable y robusto)
+// app.js — Bootstrap principal Open Padel (funciona aunque DOMContentLoaded ya pasó)
 
 import { supabase } from "./supabaseClient.js";
 import { Store } from "./store.js";
-import {
-  signInWithGoogle,
-  signOut,
-  getSessionUser,
-  listPlayers
-} from "./supabaseApi.js";
+import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supabaseApi.js";
 
-// Flag visible para debug
 window.__OP_APP_LOADED__ = true;
 
 (function () {
   const $ = (id) => document.getElementById(id);
 
-  /* ================= UTILIDADES ================= */
+  function setText(id, text) {
+    const el = $(id);
+    if (el) el.textContent = text;
+  }
 
   function show(el, yes) {
     if (!el) return;
     el.style.display = yes ? "" : "none";
-  }
-
-  function setText(id, text) {
-    const el = $(id);
-    if (el) el.textContent = text;
   }
 
   function updatePillInfo() {
@@ -35,8 +27,7 @@ window.__OP_APP_LOADED__ = true;
     pill.textContent = `N: ${n} • Canchas: ${courts}`;
   }
 
-  /* ================= NAVEGACIÓN ================= */
-
+  // -------- NAV --------
   function setActiveNav(activeId) {
     ["navBase", "navTeams", "navTurns", "navHistory"].forEach((id) => {
       const btn = $(id);
@@ -54,18 +45,14 @@ window.__OP_APP_LOADED__ = true;
     };
 
     Object.entries(views).forEach(([k, el]) => show(el, k === view));
-
     setActiveNav(
       view === "base" ? "navBase" :
       view === "teams" ? "navTeams" :
       view === "turns" ? "navTurns" : "navHistory"
     );
 
-    // Avisar a los módulos
     window.OP = window.OP || {};
-    if (typeof window.OP.refresh === "function") {
-      window.OP.refresh(view);
-    }
+    if (typeof window.OP.refresh === "function") window.OP.refresh(view);
   }
 
   function initNavigation() {
@@ -73,12 +60,10 @@ window.__OP_APP_LOADED__ = true;
     $("navTeams")?.addEventListener("click", () => showView("teams"));
     $("navTurns")?.addEventListener("click", () => showView("turns"));
     $("navHistory")?.addEventListener("click", () => showView("history"));
-
     showView("base");
   }
 
-  /* ================= AUTH ================= */
-
+  // -------- AUTH --------
   async function refreshSessionUI() {
     const loginBtn = $("loginGoogle");
     const logoutBtn = $("logoutBtn");
@@ -100,11 +85,9 @@ window.__OP_APP_LOADED__ = true;
         return;
       }
 
-      // Usuario conectado
       setText("authStatusText", `✅ Conectado: ${user.email || user.id}`);
       setText("authStatus", "Conectado ✅");
 
-      // Cargar jugadores
       const players = await listPlayers();
       Store.setPlayers(players);
 
@@ -129,12 +112,12 @@ window.__OP_APP_LOADED__ = true;
     const logoutBtn = $("logoutBtn");
 
     if (loginBtn) {
-      // Clonar para limpiar listeners viejos
-      const cleanBtn = loginBtn.cloneNode(true);
-      loginBtn.parentNode.replaceChild(cleanBtn, loginBtn);
+      // limpia listeners viejos
+      const clean = loginBtn.cloneNode(true);
+      loginBtn.parentNode.replaceChild(clean, loginBtn);
 
-      cleanBtn.disabled = false;
-      cleanBtn.addEventListener("click", async () => {
+      clean.disabled = false;
+      clean.addEventListener("click", async () => {
         try {
           setText("authStatusText", "Abriendo Google…");
           setText("authStatus", "Espera…");
@@ -162,8 +145,6 @@ window.__OP_APP_LOADED__ = true;
     }
   }
 
-  /* ================= EVENTOS ================= */
-
   function wireStoreEvents() {
     window.addEventListener("op:stateChanged", () => {
       updatePillInfo();
@@ -176,9 +157,12 @@ window.__OP_APP_LOADED__ = true;
     });
   }
 
-  /* ================= INIT ================= */
+  // ✅ INIT que funciona aunque DOMContentLoaded ya pasó
+  let started = false;
+  async function startApp() {
+    if (started) return;
+    started = true;
 
-  document.addEventListener("DOMContentLoaded", async () => {
     try {
       setText("authStatusText", "Cargando app…");
       setText("authStatus", "Inicializando…");
@@ -187,7 +171,6 @@ window.__OP_APP_LOADED__ = true;
       wireAuthButtons();
       wireStoreEvents();
 
-      // Escuchar cambios de auth (login / logout)
       supabase.auth.onAuthStateChange(async () => {
         await refreshSessionUI();
       });
@@ -200,5 +183,11 @@ window.__OP_APP_LOADED__ = true;
       setText("authStatusText", "Error cargando app.");
       setText("authStatus", `❌ ${e?.message || e}`);
     }
-  });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", startApp);
+  } else {
+    startApp();
+  }
 })();
