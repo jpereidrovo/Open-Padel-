@@ -4,12 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Open Padel</title>
-  <link rel="stylesheet" href="./css/styles.css" />
+
+  <link rel="stylesheet" href="./css/styles.css">
 </head>
 
 <body>
   <div class="app">
-
     <aside class="sidebar">
       <h2>Open Padel</h2>
 
@@ -24,8 +24,13 @@
           <span id="tagTeams" class="badge">0</span>
         </button>
 
-        <button id="navTurns" class="nav-btn">Turnos</button>
-        <button id="navHistory" class="nav-btn">Historial</button>
+        <button id="navTurns" class="nav-btn">
+          Turnos
+        </button>
+
+        <button id="navHistory" class="nav-btn">
+          Historial
+        </button>
       </nav>
 
       <div class="sidebar-footer">
@@ -34,24 +39,19 @@
     </aside>
 
     <main class="content">
-      <div class="card" id="authCard" style="margin:12px;">
-        <div id="authStatusText" class="hint muted" style="margin-bottom:10px;">
-          Cargando sesión…
-        </div>
 
-        <div class="btns">
+      <!-- LOGIN -->
+      <div class="card" style="margin:12px;">
+        <div class="btns" style="display:flex; gap:10px; flex-wrap:wrap;">
           <button class="primary" id="loginGoogle">Iniciar sesión con Google</button>
           <button class="ghost" id="logoutBtn">Cerrar sesión</button>
         </div>
 
-        <div id="authStatus" class="hint muted" style="margin-top:10px;">
-          Cargando…
-        </div>
-
-        <!-- Debug visible -->
-        <div id="bootDiag" class="hint muted" style="margin-top:10px;"></div>
+        <div id="authStatusText" class="hint muted" style="margin-top:10px;">—</div>
+        <div id="authStatus" class="hint muted" style="margin-top:6px;">—</div>
       </div>
 
+      <!-- VISTAS -->
       <section id="viewBase">
         <h1>Base de jugadores</h1>
         <div id="baseMount"></div>
@@ -71,34 +71,11 @@
         <h1>Historial</h1>
         <div id="historyMount"></div>
       </section>
+
     </main>
   </div>
 
-  <script>
-    // 1) Prueba JS básico (si no cambia, JS está bloqueado)
-    const diag = document.getElementById("bootDiag");
-    diag.textContent = "✅ JS básico OK. Intentando cargar app.js…";
-
-    // 2) Captura errores globales y los muestra
-    window.addEventListener("error", (e) => {
-      diag.textContent = "❌ Error JS: " + (e?.message || e);
-      diag.className = "hint error";
-    });
-    window.addEventListener("unhandledrejection", (e) => {
-      diag.textContent = "❌ Promise error: " + (e?.reason?.message || e?.reason || e);
-      diag.className = "hint error";
-    });
-
-    // 3) Carga el módulo de forma que si falla, lo veas en pantalla
-    import("./js/app.js?v=7")
-      .then(() => {
-        diag.textContent = "✅ app.js cargado y ejecutado.";
-        diag.className = "hint ok";
-      })
-      .catch((err) => {
-        diag.textContent = "❌ Falló import app.js: " + (err?.message || err);
-        diag.className = "hint error";
-      });
-  </script>
+  <!-- IMPORTANTE: app.js como módulo -->
+  <script type="module" src="./js/app.js"></script>
 </body>
 </html>
