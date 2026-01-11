@@ -1,8 +1,14 @@
-// app.js — Bootstrap principal Open Padel (funciona aunque DOMContentLoaded ya pasó)
+// app.js — Bootstrap principal Open Padel (carga módulos + auth + navegación)
 
 import { supabase } from "./supabaseClient.js";
 import { Store } from "./store.js";
 import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supabaseApi.js";
+
+// ✅ IMPORTANTÍSIMO: cargar módulos (side-effects)
+import "./db.js";
+import "./teams.js";
+import "./turns.js";
+import "./history.js";
 
 window.__OP_APP_LOADED__ = true;
 
@@ -27,7 +33,7 @@ window.__OP_APP_LOADED__ = true;
     pill.textContent = `N: ${n} • Canchas: ${courts}`;
   }
 
-  // -------- NAV --------
+  // ---------- NAV ----------
   function setActiveNav(activeId) {
     ["navBase", "navTeams", "navTurns", "navHistory"].forEach((id) => {
       const btn = $(id);
@@ -45,12 +51,14 @@ window.__OP_APP_LOADED__ = true;
     };
 
     Object.entries(views).forEach(([k, el]) => show(el, k === view));
+
     setActiveNav(
       view === "base" ? "navBase" :
       view === "teams" ? "navTeams" :
       view === "turns" ? "navTurns" : "navHistory"
     );
 
+    // Avisar a los módulos (db/teams/turns/history)
     window.OP = window.OP || {};
     if (typeof window.OP.refresh === "function") window.OP.refresh(view);
   }
@@ -63,7 +71,7 @@ window.__OP_APP_LOADED__ = true;
     showView("base");
   }
 
-  // -------- AUTH --------
+  // ---------- AUTH ----------
   async function refreshSessionUI() {
     const loginBtn = $("loginGoogle");
     const logoutBtn = $("logoutBtn");
@@ -88,11 +96,17 @@ window.__OP_APP_LOADED__ = true;
       setText("authStatusText", `✅ Conectado: ${user.email || user.id}`);
       setText("authStatus", "Conectado ✅");
 
+      // ✅ Cargar jugadores
       const players = await listPlayers();
       Store.setPlayers(players);
 
+      // ✅ Listo
       Store.setReady();
       updatePillInfo();
+
+      // Al estar listo, refrescar la vista actual (base por defecto)
+      window.OP = window.OP || {};
+      if (typeof window.OP.refresh === "function") window.OP.refresh("base");
 
       if (loginBtn) loginBtn.disabled = true;
       if (logoutBtn) logoutBtn.disabled = false;
@@ -112,7 +126,7 @@ window.__OP_APP_LOADED__ = true;
     const logoutBtn = $("logoutBtn");
 
     if (loginBtn) {
-      // limpia listeners viejos
+      // limpiar listeners viejos
       const clean = loginBtn.cloneNode(true);
       loginBtn.parentNode.replaceChild(clean, loginBtn);
 
@@ -157,7 +171,7 @@ window.__OP_APP_LOADED__ = true;
     });
   }
 
-  // ✅ INIT que funciona aunque DOMContentLoaded ya pasó
+  // ✅ INIT aunque DOMContentLoaded ya pasó
   let started = false;
   async function startApp() {
     if (started) return;
@@ -171,6 +185,7 @@ window.__OP_APP_LOADED__ = true;
       wireAuthButtons();
       wireStoreEvents();
 
+      // auth changes
       supabase.auth.onAuthStateChange(async () => {
         await refreshSessionUI();
       });
