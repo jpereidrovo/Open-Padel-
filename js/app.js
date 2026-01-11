@@ -1,208 +1,81 @@
-// app.js — Bootstrap principal Open Padel (carga módulos + auth + navegación)
+// app.js — Bootstrap principal Open Padel (sesión estable)
 
 import { supabase } from "./supabaseClient.js";
 import { Store } from "./store.js";
 import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supabaseApi.js";
 
-// ✅ IMPORTANTÍSIMO: cargar módulos (side-effects)
 import "./db.js";
 import "./teams.js";
 import "./turns.js";
 import "./history.js";
 
-window.__OP_APP_LOADED__ = true;
-
 (function () {
   const $ = (id) => document.getElementById(id);
 
-  function setText(id, text) {
-    const el = $(id);
-    if (el) el.textContent = text;
-  }
-
   function show(el, yes) {
-    if (!el) return;
-    el.style.display = yes ? "" : "none";
-  }
-
-  function updatePillInfo() {
-    const pill = $("pillInfo");
-    if (!pill) return;
-    const n = (Store.state?.pool || []).length;
-    const courts = n ? Math.floor(n / 4) : 0;
-    pill.textContent = `N: ${n} • Canchas: ${courts}`;
-  }
-
-  // ---------- NAV ----------
-  function setActiveNav(activeId) {
-    ["navBase", "navTeams", "navTurns", "navHistory"].forEach((id) => {
-      const btn = $(id);
-      if (!btn) return;
-      btn.classList.toggle("active", id === activeId);
-    });
+    if (el) el.style.display = yes ? "" : "none";
   }
 
   function showView(view) {
-    const views = {
-      base: $("viewBase"),
-      teams: $("viewTeams"),
-      turns: $("viewTurns"),
-      history: $("viewHistory"),
-    };
+    show($("viewBase"), view === "base");
+    show($("viewTeams"), view === "teams");
+    show($("viewTurns"), view === "turns");
+    show($("viewHistory"), view === "history");
 
-    Object.entries(views).forEach(([k, el]) => show(el, k === view));
+    ["navBase","navTeams","navTurns","navHistory"].forEach(id => {
+      $(id)?.classList.toggle("active", id === "nav" + view.charAt(0).toUpperCase() + view.slice(1));
+    });
 
-    setActiveNav(
-      view === "base" ? "navBase" :
-      view === "teams" ? "navTeams" :
-      view === "turns" ? "navTurns" : "navHistory"
-    );
-
-    // Avisar a los módulos (db/teams/turns/history)
-    window.OP = window.OP || {};
-    if (typeof window.OP.refresh === "function") window.OP.refresh(view);
+    window.OP?.refresh?.(view);
   }
 
-  function initNavigation() {
+  async function refreshSession(origin) {
+    const loginBtn = $("loginGoogle");
+    const logoutBtn = $("logoutBtn");
+
+    try {
+      const user = await getSessionUser();
+
+      if (!user) {
+        Store.ready = false;
+        loginBtn && (loginBtn.disabled = false);
+        logoutBtn && (logoutBtn.disabled = true);
+        return;
+      }
+
+      if (!Store.ready) {
+        const players = await listPlayers();
+        Store.setPlayers(players);
+        Store.setReady();
+      }
+
+      loginBtn && (loginBtn.disabled = true);
+      logoutBtn && (logoutBtn.disabled = false);
+    } catch (e) {
+      console.error("session error", e);
+    }
+  }
+
+  async function start() {
     $("navBase")?.addEventListener("click", () => showView("base"));
     $("navTeams")?.addEventListener("click", () => showView("teams"));
     $("navTurns")?.addEventListener("click", () => showView("turns"));
     $("navHistory")?.addEventListener("click", () => showView("history"));
+
+    $("loginGoogle")?.addEventListener("click", signInWithGoogle);
+    $("logoutBtn")?.addEventListener("click", signOut);
+
+    supabase.auth.onAuthStateChange(() => refreshSession("auth"));
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") refreshSession("tab");
+    });
+    window.addEventListener("focus", () => refreshSession("focus"));
+
+    await refreshSession("init");
     showView("base");
   }
 
-  // ---------- AUTH ----------
-  async function refreshSessionUI() {
-    const loginBtn = $("loginGoogle");
-    const logoutBtn = $("logoutBtn");
-
-    try {
-      setText("authStatusText", "Verificando sesión…");
-      setText("authStatus", "Conectando…");
-
-      if (loginBtn) loginBtn.disabled = false;
-      if (logoutBtn) logoutBtn.disabled = false;
-
-      const user = await getSessionUser();
-
-      if (!user) {
-        setText("authStatusText", "Inicia sesión para usar la app.");
-        setText("authStatus", "No conectado");
-        if (logoutBtn) logoutBtn.disabled = true;
-        Store.ready = false;
-        return;
-      }
-
-      setText("authStatusText", `✅ Conectado: ${user.email || user.id}`);
-      setText("authStatus", "Conectado ✅");
-
-      // ✅ Cargar jugadores
-      const players = await listPlayers();
-      Store.setPlayers(players);
-
-      // ✅ Listo
-      Store.setReady();
-      updatePillInfo();
-
-      // Al estar listo, refrescar la vista actual (base por defecto)
-      window.OP = window.OP || {};
-      if (typeof window.OP.refresh === "function") window.OP.refresh("base");
-
-      if (loginBtn) loginBtn.disabled = true;
-      if (logoutBtn) logoutBtn.disabled = false;
-
-    } catch (e) {
-      console.error("❌ refreshSessionUI", e);
-      setText("authStatusText", "Error verificando sesión.");
-      setText("authStatus", `❌ ${e?.message || e}`);
-      if (loginBtn) loginBtn.disabled = false;
-      if (logoutBtn) logoutBtn.disabled = true;
-      Store.ready = false;
-    }
-  }
-
-  function wireAuthButtons() {
-    const loginBtn = $("loginGoogle");
-    const logoutBtn = $("logoutBtn");
-
-    if (loginBtn) {
-      // limpiar listeners viejos
-      const clean = loginBtn.cloneNode(true);
-      loginBtn.parentNode.replaceChild(clean, loginBtn);
-
-      clean.disabled = false;
-      clean.addEventListener("click", async () => {
-        try {
-          setText("authStatusText", "Abriendo Google…");
-          setText("authStatus", "Espera…");
-          await signInWithGoogle();
-        } catch (e) {
-          console.error("❌ signInWithGoogle", e);
-          setText("authStatusText", "Error al iniciar sesión.");
-          setText("authStatus", `❌ ${e?.message || e}`);
-        }
-      });
-    }
-
-    if (logoutBtn) {
-      logoutBtn.disabled = false;
-      logoutBtn.addEventListener("click", async () => {
-        try {
-          setText("authStatusText", "Cerrando sesión…");
-          setText("authStatus", "");
-          await signOut();
-          location.reload();
-        } catch (e) {
-          console.error("❌ signOut", e);
-        }
-      });
-    }
-  }
-
-  function wireStoreEvents() {
-    window.addEventListener("op:stateChanged", () => {
-      updatePillInfo();
-      const tagTeams = $("tagTeams");
-      if (tagTeams) {
-        const a = (Store.state?.team_a || []).length;
-        const b = (Store.state?.team_b || []).length;
-        tagTeams.textContent = String(a + b);
-      }
-    });
-  }
-
-  // ✅ INIT aunque DOMContentLoaded ya pasó
-  let started = false;
-  async function startApp() {
-    if (started) return;
-    started = true;
-
-    try {
-      setText("authStatusText", "Cargando app…");
-      setText("authStatus", "Inicializando…");
-
-      initNavigation();
-      wireAuthButtons();
-      wireStoreEvents();
-
-      // auth changes
-      supabase.auth.onAuthStateChange(async () => {
-        await refreshSessionUI();
-      });
-
-      await refreshSessionUI();
-
-      console.log("✅ app.js listo");
-    } catch (e) {
-      console.error("❌ app init", e);
-      setText("authStatusText", "Error cargando app.");
-      setText("authStatus", `❌ ${e?.message || e}`);
-    }
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", startApp);
-  } else {
-    startApp();
-  }
+  document.readyState === "loading"
+    ? document.addEventListener("DOMContentLoaded", start)
+    : start();
 })();
