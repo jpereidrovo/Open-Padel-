@@ -1,21 +1,31 @@
-// app.js — bootstrap robusto + diagnóstico visible
+// app.js — Bootstrap principal Open Padel (estable y robusto)
+
 import { supabase } from "./supabaseClient.js";
 import { Store } from "./store.js";
-import { listPlayers, signInWithGoogle, signOut, getSessionUser } from "./supabaseApi.js";
+import {
+  signInWithGoogle,
+  signOut,
+  getSessionUser,
+  listPlayers
+} from "./supabaseApi.js";
 
+// Flag visible para debug
 window.__OP_APP_LOADED__ = true;
 
 (function () {
   const $ = (id) => document.getElementById(id);
 
-  function setUI(msgTop, msgBottom) {
-    const top = $("authStatusText");
-    const bottom = $("authStatus");
-    if (top && msgTop !== undefined) top.textContent = msgTop;
-    if (bottom && msgBottom !== undefined) bottom.textContent = msgBottom;
+  /* ================= UTILIDADES ================= */
+
+  function show(el, yes) {
+    if (!el) return;
+    el.style.display = yes ? "" : "none";
   }
 
-  function show(el, yes) { if (el) el.style.display = yes ? "" : "none"; }
+  function setText(id, text) {
+    const el = $(id);
+    if (el) el.textContent = text;
+  }
 
   function updatePillInfo() {
     const pill = $("pillInfo");
@@ -25,53 +35,79 @@ window.__OP_APP_LOADED__ = true;
     pill.textContent = `N: ${n} • Canchas: ${courts}`;
   }
 
+  /* ================= NAVEGACIÓN ================= */
+
   function setActiveNav(activeId) {
-    ["navBase","navTeams","navTurns","navHistory"].forEach(id=>{
-      const b = $(id);
-      if (b) b.classList.toggle("active", id === activeId);
+    ["navBase", "navTeams", "navTurns", "navHistory"].forEach((id) => {
+      const btn = $(id);
+      if (!btn) return;
+      btn.classList.toggle("active", id === activeId);
     });
   }
 
-  function showView(which) {
+  function showView(view) {
     const views = {
       base: $("viewBase"),
       teams: $("viewTeams"),
       turns: $("viewTurns"),
       history: $("viewHistory"),
     };
-    Object.entries(views).forEach(([k, el]) => show(el, k === which));
-    setActiveNav(which==="base"?"navBase":which==="teams"?"navTeams":which==="turns"?"navTurns":"navHistory");
+
+    Object.entries(views).forEach(([k, el]) => show(el, k === view));
+
+    setActiveNav(
+      view === "base" ? "navBase" :
+      view === "teams" ? "navTeams" :
+      view === "turns" ? "navTurns" : "navHistory"
+    );
+
+    // Avisar a los módulos
     window.OP = window.OP || {};
-    if (typeof window.OP.refresh === "function") window.OP.refresh(which);
+    if (typeof window.OP.refresh === "function") {
+      window.OP.refresh(view);
+    }
   }
+
+  function initNavigation() {
+    $("navBase")?.addEventListener("click", () => showView("base"));
+    $("navTeams")?.addEventListener("click", () => showView("teams"));
+    $("navTurns")?.addEventListener("click", () => showView("turns"));
+    $("navHistory")?.addEventListener("click", () => showView("history"));
+
+    showView("base");
+  }
+
+  /* ================= AUTH ================= */
 
   async function refreshSessionUI() {
     const loginBtn = $("loginGoogle");
     const logoutBtn = $("logoutBtn");
 
     try {
-      setUI("Verificando sesión…", "Conectando…");
+      setText("authStatusText", "Verificando sesión…");
+      setText("authStatus", "Conectando…");
 
-      // Siempre habilitar botones para que no quede “muerto”
       if (loginBtn) loginBtn.disabled = false;
       if (logoutBtn) logoutBtn.disabled = false;
 
       const user = await getSessionUser();
 
       if (!user) {
-        setUI("Inicia sesión para usar la app.", "No conectado");
+        setText("authStatusText", "Inicia sesión para usar la app.");
+        setText("authStatus", "No conectado");
         if (logoutBtn) logoutBtn.disabled = true;
         Store.ready = false;
         return;
       }
 
-      setUI(`✅ Conectado: ${user.email || user.id}`, "Conectado ✅");
+      // Usuario conectado
+      setText("authStatusText", `✅ Conectado: ${user.email || user.id}`);
+      setText("authStatus", "Conectado ✅");
 
-      // cargar jugadores
+      // Cargar jugadores
       const players = await listPlayers();
       Store.setPlayers(players);
 
-      // listo
       Store.setReady();
       updatePillInfo();
 
@@ -80,10 +116,8 @@ window.__OP_APP_LOADED__ = true;
 
     } catch (e) {
       console.error("❌ refreshSessionUI", e);
-      setUI("Error verificando sesión.", `❌ ${e?.message || e}`);
-      // dejar login habilitado para intentar
-      const loginBtn = $("loginGoogle");
-      const logoutBtn = $("logoutBtn");
+      setText("authStatusText", "Error verificando sesión.");
+      setText("authStatus", `❌ ${e?.message || e}`);
       if (loginBtn) loginBtn.disabled = false;
       if (logoutBtn) logoutBtn.disabled = true;
       Store.ready = false;
@@ -95,48 +129,65 @@ window.__OP_APP_LOADED__ = true;
     const logoutBtn = $("logoutBtn");
 
     if (loginBtn) {
-      loginBtn.disabled = false;
-      loginBtn.addEventListener("click", async () => {
+      // Clonar para limpiar listeners viejos
+      const cleanBtn = loginBtn.cloneNode(true);
+      loginBtn.parentNode.replaceChild(cleanBtn, loginBtn);
+
+      cleanBtn.disabled = false;
+      cleanBtn.addEventListener("click", async () => {
         try {
-          setUI("Abriendo Google…", "Espera…");
+          setText("authStatusText", "Abriendo Google…");
+          setText("authStatus", "Espera…");
           await signInWithGoogle();
         } catch (e) {
           console.error("❌ signInWithGoogle", e);
-          setUI("Error al iniciar sesión.", `❌ ${e?.message || e}`);
+          setText("authStatusText", "Error al iniciar sesión.");
+          setText("authStatus", `❌ ${e?.message || e}`);
         }
       });
     }
 
     if (logoutBtn) {
+      logoutBtn.disabled = false;
       logoutBtn.addEventListener("click", async () => {
         try {
-          setUI("Cerrando sesión…", "");
+          setText("authStatusText", "Cerrando sesión…");
+          setText("authStatus", "");
           await signOut();
           location.reload();
         } catch (e) {
           console.error("❌ signOut", e);
-          setUI("Error al cerrar sesión.", `❌ ${e?.message || e}`);
         }
       });
     }
   }
 
-  function initNav() {
-    $("navBase")?.addEventListener("click", () => showView("base"));
-    $("navTeams")?.addEventListener("click", () => showView("teams"));
-    $("navTurns")?.addEventListener("click", () => showView("turns"));
-    $("navHistory")?.addEventListener("click", () => showView("history"));
-    showView("base");
+  /* ================= EVENTOS ================= */
+
+  function wireStoreEvents() {
+    window.addEventListener("op:stateChanged", () => {
+      updatePillInfo();
+      const tagTeams = $("tagTeams");
+      if (tagTeams) {
+        const a = (Store.state?.team_a || []).length;
+        const b = (Store.state?.team_b || []).length;
+        tagTeams.textContent = String(a + b);
+      }
+    });
   }
+
+  /* ================= INIT ================= */
 
   document.addEventListener("DOMContentLoaded", async () => {
     try {
-      setUI("Cargando app…", "Inicializando…");
+      setText("authStatusText", "Cargando app…");
+      setText("authStatus", "Inicializando…");
 
-      initNav();
+      initNavigation();
       wireAuthButtons();
+      wireStoreEvents();
 
-      // escuchar cambios auth
+      // Escuchar cambios de auth (login / logout)
       supabase.auth.onAuthStateChange(async () => {
         await refreshSessionUI();
       });
@@ -146,7 +197,8 @@ window.__OP_APP_LOADED__ = true;
       console.log("✅ app.js listo");
     } catch (e) {
       console.error("❌ app init", e);
-      setUI("Error cargando app.", `❌ ${e?.message || e}`);
+      setText("authStatusText", "Error cargando app.");
+      setText("authStatus", `❌ ${e?.message || e}`);
     }
   });
 })();
