@@ -15,6 +15,6 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     storageKey: "openpadel-auth",
     storage: window.localStorage
   }
-})
+});
 
 console.log("✅ Supabase client inicializado");
