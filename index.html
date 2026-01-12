@@ -5,7 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Open Padel</title>
 
-  <link rel="stylesheet" href="./css/styles.css">
+  <!-- evita 404 favicon -->
+  <link rel="icon" href="data:,">
+
+  <!-- ✅ cache-busting -->
+  <link rel="stylesheet" href="./css/styles.css?v=20260112">
 
   <style>
     /* UX helpers (no pisa tu CSS: son utilitarios) */
@@ -111,9 +115,7 @@
       <div class="card" style="margin:12px;">
         <div class="auth-bar">
           <div class="auth-left">
-            <span class="avatar" id="userAvatar" aria-hidden="true">
-              <!-- imagen desde JS -->
-            </span>
+            <span class="avatar" id="userAvatar" aria-hidden="true"></span>
 
             <div class="who">
               <div class="name" id="userName">No has iniciado sesión</div>
@@ -130,7 +132,6 @@
         <div class="status-row">
           <span class="dot" id="authDot" aria-hidden="true"></span>
           <span class="spinner" id="authSpinner" aria-hidden="true"></span>
-
           <div class="hint muted" id="authStatusText">—</div>
         </div>
 
@@ -150,21 +151,3 @@
 
       <section id="viewTurns" style="display:none;">
         <h1>Turnos</h1>
-        <div id="turnsMount"></div>
-      </section>
-
-      <section id="viewHistory" style="display:none;">
-        <h1>Historial</h1>
-        <div id="historyMount"></div>
-      </section>
-
-    </main>
-  </div>
-
-  <!-- ✅ jsPDF (PDF en Turnos) -->
-  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
-
-  <!-- app.js como módulo -->
-  <script type="module" src="./js/app.js"></script>
-</body>
-</html>
