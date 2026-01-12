@@ -6,29 +6,96 @@
   <title>Open Padel</title>
 
   <link rel="stylesheet" href="./css/styles.css">
+
+  <style>
+    /* UX helpers (no pisa tu CSS: son utilitarios) */
+    .auth-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    .auth-left { display:flex; align-items:center; gap:10px; min-width:260px; }
+    .avatar {
+      width:34px; height:34px; border-radius:999px;
+      background:#1f2937; display:inline-flex; align-items:center; justify-content:center;
+      overflow:hidden; flex: 0 0 auto;
+    }
+    .avatar img { width:100%; height:100%; object-fit:cover; display:block; }
+    .who { display:flex; flex-direction:column; line-height:1.15; }
+    .who .name { font-weight:600; }
+    .who .mail { font-size:12px; opacity:.8; }
+    .auth-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .status-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:10px; }
+    .dot { width:10px; height:10px; border-radius:999px; display:inline-block; background:#9ca3af; }
+    .dot.ok { background:#22c55e; }
+    .dot.bad { background:#ef4444; }
+    .spinner {
+      width:14px; height:14px; border-radius:999px;
+      border:2px solid rgba(0,0,0,.15); border-top-color: rgba(0,0,0,.55);
+      animation: spin .8s linear infinite;
+      display:none;
+    }
+    .spinner.on { display:inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Toasts (se usa desde JS) */
+    .toasts {
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 9999;
+      max-width: min(420px, calc(100vw - 28px));
+    }
+    .toast {
+      background: rgba(17,24,39,.96);
+      color: #fff;
+      border-radius: 14px;
+      padding: 10px 12px;
+      box-shadow: 0 12px 30px rgba(0,0,0,.25);
+      display:flex;
+      gap:10px;
+      align-items:flex-start;
+    }
+    .toast .t-title { font-weight:700; margin-bottom:2px; }
+    .toast .t-body { font-size:13px; opacity:.92; }
+    .toast .t-x {
+      margin-left:auto;
+      border: none;
+      background: transparent;
+      color: rgba(255,255,255,.85);
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      padding: 2px 6px;
+      border-radius: 10px;
+    }
+    .toast .t-x:hover { background: rgba(255,255,255,.08); }
+  </style>
 </head>
 
 <body>
+  <!-- Toast container -->
+  <div id="toasts" class="toasts" aria-live="polite" aria-relevant="additions"></div>
+
   <div class="app">
     <aside class="sidebar">
       <h2>Open Padel</h2>
 
       <nav>
-        <button id="navBase" class="nav-btn active">
+        <button id="navBase" class="nav-btn active" type="button">
           Base de jugadores
           <span id="tagBase" class="badge">0</span>
         </button>
 
-        <button id="navTeams" class="nav-btn">
+        <button id="navTeams" class="nav-btn" type="button">
           Equipos
           <span id="tagTeams" class="badge">0</span>
         </button>
 
-        <button id="navTurns" class="nav-btn">
+        <button id="navTurns" class="nav-btn" type="button">
           Turnos
         </button>
 
-        <button id="navHistory" class="nav-btn">
+        <button id="navHistory" class="nav-btn" type="button">
           Historial
         </button>
       </nav>
@@ -40,15 +107,34 @@
 
     <main class="content">
 
-      <!-- LOGIN -->
+      <!-- AUTH / SESIÓN -->
       <div class="card" style="margin:12px;">
-        <div class="btns" style="display:flex; gap:10px; flex-wrap:wrap;">
-          <button class="primary" id="loginGoogle">Iniciar sesión con Google</button>
-          <button class="ghost" id="logoutBtn">Cerrar sesión</button>
+        <div class="auth-bar">
+          <div class="auth-left">
+            <span class="avatar" id="userAvatar" aria-hidden="true">
+              <!-- imagen desde JS -->
+            </span>
+
+            <div class="who">
+              <div class="name" id="userName">No has iniciado sesión</div>
+              <div class="mail muted" id="userEmail">—</div>
+            </div>
+          </div>
+
+          <div class="auth-actions">
+            <button class="primary" id="loginGoogle" type="button">Iniciar sesión con Google</button>
+            <button class="ghost" id="logoutBtn" type="button" disabled>Cerrar sesión</button>
+          </div>
         </div>
 
-        <div id="authStatusText" class="hint muted" style="margin-top:10px;">—</div>
-        <div id="authStatus" class="hint muted" style="margin-top:6px;">—</div>
+        <div class="status-row">
+          <span class="dot" id="authDot" aria-hidden="true"></span>
+          <span class="spinner" id="authSpinner" aria-hidden="true"></span>
+
+          <div class="hint muted" id="authStatusText">—</div>
+        </div>
+
+        <div class="hint muted" id="authStatus" style="margin-top:6px;">—</div>
       </div>
 
       <!-- VISTAS -->
@@ -75,7 +161,7 @@
     </main>
   </div>
 
-  <!-- IMPORTANTE: app.js como módulo -->
+  <!-- app.js como módulo -->
   <script type="module" src="./js/app.js"></script>
 </body>
 </html>
