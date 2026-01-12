@@ -1,22 +1,41 @@
 // supabaseApi.js — API única para Open Padel (Supabase)
-// Incluye: Auth Google (redirect GitHub Pages), Players CRUD, Sessions (equipos), Results (turnos), History + delete
+// Incluye: Auth Google (PKCE + exchangeCodeForSession), Players, Sessions (equipos), Results (turnos), History + delete
 
 import { supabase } from "./supabaseClient.js";
 
 export const GROUP_CODE = "open-padel";
 
-// ---- Helpers ----
+// ---------------- Helpers ----------------
 function cleanDate(d) {
   return String(d || "").slice(0, 10);
 }
 
+// ---------------- AUTH ----------------
 export async function getSessionUser() {
-  // Siempre intentar leer sesión local primero
+  // ✅ Si volvemos del login con ?code=..., hay que intercambiarlo por una sesión
+  const url = new URL(window.location.href);
+  const code = url.searchParams.get("code");
+
+  if (code) {
+    try {
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
+      if (error) console.warn("exchangeCodeForSession error:", error);
+
+      // limpiar URL para no repetir el intercambio
+      url.searchParams.delete("code");
+      url.searchParams.delete("state");
+      window.history.replaceState({}, document.title, url.toString());
+    } catch (e) {
+      console.warn("exchangeCodeForSession throw:", e);
+    }
+  }
+
+  // leer sesión local
   const { data: s1, error: e1 } = await supabase.auth.getSession();
   if (e1) throw e1;
   if (s1?.session?.user) return s1.session.user;
 
-  // Si no hay, pedir user (a veces se resuelve aquí)
+  // fallback
   const { data: u, error: e2 } = await supabase.auth.getUser();
   if (e2) return null;
   return u?.user || null;
@@ -28,28 +47,20 @@ export async function requireSession() {
   return user;
 }
 
-// ---- AUTH ----
 export async function signInWithGoogle() {
-  // ✅ Muy importante en GitHub Pages:
-  // window.location.origin + window.location.pathname => https://usuario.github.io/repo/
-  // Esto evita errores por rutas y hace que vuelva a tu app
+  // ✅ En GitHub Pages esto es clave:
+  // vuelve EXACTO a https://jpereidrovo.github.io/Open-Padel-/
   const redirectTo = window.location.origin + window.location.pathname;
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
       redirectTo,
-      queryParams: {
-        access_type: "offline",
-        prompt: "consent"
-      }
+      queryParams: { access_type: "offline", prompt: "consent" }
     }
   });
 
   if (error) throw error;
-
-  // Nota: en redirect flow, normalmente navegará automáticamente.
-  // data.url existe si quieres redirigir manualmente, pero supabase lo hace.
   return data;
 }
 
@@ -58,7 +69,7 @@ export async function signOut() {
   if (error) throw error;
 }
 
-// ---- PLAYERS ----
+// ---------------- PLAYERS ----------------
 export async function listPlayers() {
   await requireSession();
 
@@ -79,13 +90,11 @@ export async function upsertPlayer(player) {
     id: player.id,
     name: String(player.name || "").trim(),
     side: player.side === "R" ? "R" : "D",
-    // rating puede ser 0.5, 1.0, 1.5...
-    rating: Number(player.rating),
+    rating: Number(player.rating), // admite 0.5
     group_code: GROUP_CODE,
     updated_at: new Date().toISOString()
   };
 
-  // No mandar id si es nuevo
   if (!payload.id) delete payload.id;
 
   const { error } = await supabase
@@ -118,7 +127,7 @@ export async function deleteAllPlayers() {
   if (error) throw error;
 }
 
-// ---- SESSIONS (Equipos) ----
+// ---------------- SESSIONS (Equipos) ----------------
 export async function saveTeamsToHistory(session_date, totalPlayers, teamA, teamB) {
   await requireSession();
 
@@ -133,7 +142,6 @@ export async function saveTeamsToHistory(session_date, totalPlayers, teamA, team
     updated_at: new Date().toISOString()
   };
 
-  // upsert por unique(group_code, session_date)
   const { error } = await supabase
     .from("sessions")
     .upsert(payload, { onConflict: "group_code,session_date" });
@@ -141,7 +149,7 @@ export async function saveTeamsToHistory(session_date, totalPlayers, teamA, team
   if (error) throw error;
 }
 
-// ---- RESULTS (Turnos + Summary) ----
+// ---------------- RESULTS (Turnos + Summary) ----------------
 export async function saveResultsToHistory(session_date, turns, scores, summary) {
   await requireSession();
 
@@ -156,7 +164,6 @@ export async function saveResultsToHistory(session_date, turns, scores, summary)
     updated_at: new Date().toISOString()
   };
 
-  // upsert por unique(group_code, session_date)
   const { error } = await supabase
     .from("results")
     .upsert(payload, { onConflict: "group_code,session_date" });
@@ -164,11 +171,10 @@ export async function saveResultsToHistory(session_date, turns, scores, summary)
   if (error) throw error;
 }
 
-// ---- HISTORY ----
+// ---------------- HISTORY ----------------
 export async function listHistoryDates() {
   await requireSession();
 
-  // Tomamos fechas desde sessions (es la “base” del historial)
   const { data, error } = await supabase
     .from("sessions")
     .select("session_date")
@@ -193,7 +199,7 @@ export async function getHistoryDetail(session_date) {
 
   if (e1) throw e1;
 
-  const session = (sessions && sessions[0]) ? sessions[0] : null;
+  const session = sessions?.[0] || null;
 
   const { data: resultsRows, error: e2 } = await supabase
     .from("results")
@@ -204,32 +210,27 @@ export async function getHistoryDetail(session_date) {
 
   if (e2) throw e2;
 
-  const results = (resultsRows && resultsRows[0]) ? resultsRows[0] : null;
+  const results = resultsRows?.[0] || null;
 
   return { session, results };
 }
 
-// ---- DELETE HISTORY DATE ----
 export async function deleteHistoryDate(session_date) {
   await requireSession();
 
   const date = cleanDate(session_date);
 
-  // borrar results primero
   const { error: e1 } = await supabase
     .from("results")
     .delete()
     .eq("group_code", GROUP_CODE)
     .eq("session_date", date);
-
   if (e1) throw e1;
 
-  // borrar sessions (esto elimina la fecha del historial)
   const { error: e2 } = await supabase
     .from("sessions")
     .delete()
     .eq("group_code", GROUP_CODE)
     .eq("session_date", date);
-
   if (e2) throw e2;
 }
