@@ -6,35 +6,7 @@
   <title>Open Padel</title>
 
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./css/styles.css?v=20260112-99">
-
-  <style>
-    /* UX helpers (no pisa tu CSS: son utilitarios) */
-    .auth-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
-    .auth-left { display:flex; align-items:center; gap:10px; min-width:260px; }
-    .avatar {
-      width:34px; height:34px; border-radius:999px;
-      background:#1f2937; display:inline-flex; align-items:center; justify-content:center;
-      overflow:hidden; flex: 0 0 auto;
-    }
-    .avatar img { width:100%; height:100%; object-fit:cover; display:block; }
-    .who { display:flex; flex-direction:column; line-height:1.15; }
-    .who .name { font-weight:600; }
-    .who .mail { font-size:12px; opacity:.8; }
-    .auth-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-    .status-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:10px; }
-    .dot { width:10px; height:10px; border-radius:999px; display:inline-block; background:#9ca3af; }
-    .dot.ok { background:#22c55e; }
-    .dot.bad { background:#ef4444; }
-    .spinner {
-      width:14px; height:14px; border-radius:999px;
-      border:2px solid rgba(0,0,0,.15); border-top-color: rgba(0,0,0,.55);
-      animation: spin .8s linear infinite;
-      display:none;
-    }
-    .spinner.on { display:inline-block; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-  </style>
+  <link rel="stylesheet" href="./css/styles.css">
 </head>
 
 <body>
@@ -62,35 +34,32 @@
 
     <main class="content">
 
-      <!-- AUTH / SESIÓN -->
+      <!-- AUTH / SESIÓN (ya estable, no tocar) -->
       <div class="card" style="margin:12px;">
-        <div class="auth-bar">
-          <div class="auth-left">
-            <span class="avatar" id="userAvatar" aria-hidden="true"></span>
+        <div class="auth-bar" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+          <div class="auth-left" style="display:flex; align-items:center; gap:10px; min-width:260px;">
+            <span class="avatar" id="userAvatar" aria-hidden="true"
+              style="width:34px;height:34px;border-radius:999px;background:#1f2937;display:inline-flex;align-items:center;justify-content:center;overflow:hidden;flex:0 0 auto;">
+            </span>
 
-            <div class="who">
-              <div class="name" id="userName">No has iniciado sesión</div>
-              <div class="mail muted" id="userEmail">—</div>
+            <div class="who" style="display:flex; flex-direction:column; line-height:1.15;">
+              <div class="name" id="userName" style="font-weight:600;">No has iniciado sesión</div>
+              <div class="mail muted" id="userEmail" style="font-size:12px; opacity:.8;">—</div>
             </div>
           </div>
 
-          <div class="auth-actions">
-            <!-- ✅ onclick directo: NO depende de que app.js “wiree” -->
-            <button class="primary" id="loginGoogle" type="button"
-              onclick="window.OP_LOGIN && window.OP_LOGIN()">
-              Iniciar sesión con Google
-            </button>
-
-            <button class="ghost" id="logoutBtn" type="button" disabled
-              onclick="window.OP_LOGOUT && window.OP_LOGOUT()">
-              Cerrar sesión
-            </button>
+          <div class="auth-actions" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <button class="primary" id="loginGoogle" type="button">Iniciar sesión con Google</button>
+            <button class="ghost" id="logoutBtn" type="button" disabled>Cerrar sesión</button>
           </div>
         </div>
 
-        <div class="status-row">
-          <span class="dot" id="authDot" aria-hidden="true"></span>
-          <span class="spinner" id="authSpinner" aria-hidden="true"></span>
+        <div class="status-row" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:10px;">
+          <span class="dot" id="authDot" aria-hidden="true"
+            style="width:10px;height:10px;border-radius:999px;display:inline-block;background:#9ca3af;"></span>
+          <span class="spinner" id="authSpinner" aria-hidden="true"
+            style="width:14px;height:14px;border-radius:999px;border:2px solid rgba(0,0,0,.15);border-top-color: rgba(0,0,0,.55);display:none;"></span>
+
           <div class="hint muted" id="authStatusText">—</div>
         </div>
 
@@ -121,6 +90,10 @@
     </main>
   </div>
 
-  <script type="module" src="./js/app.js?v=20260112-99"></script>
+  <!-- ✅ jsPDF (UMD global: window.jspdf) -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+  <!-- app.js como módulo -->
+  <script type="module" src="./js/app.js"></script>
 </body>
 </html>
