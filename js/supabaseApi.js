@@ -1,6 +1,5 @@
 // supabaseApi.js — API única para Open Padel (Supabase)
-// Auth, Players, Sessions, Results, History + Delete
-// ✅ Auth robusto (PKCE/redirect) + ✅ guardado manual (sin ON CONFLICT)
+// Auth robusto + Players + Sessions/Results guardado seguro (sin UNIQUE) + History delete
 
 import { supabase } from "./supabaseClient.js";
 
@@ -12,7 +11,7 @@ function cleanDate(d) {
 
 // ---------------- AUTH ----------------
 export async function getSessionUser() {
-  // ✅ Si volvemos del OAuth con ?code=..., intercambiamos (por si app.js no alcanzó o hubo race)
+  // Si volvemos del OAuth con ?code=..., intercambiar (por si hubo race)
   const url = new URL(window.location.href);
   const code = url.searchParams.get("code");
   if (code) {
@@ -20,7 +19,6 @@ export async function getSessionUser() {
       const { error } = await supabase.auth.exchangeCodeForSession(code);
       if (error) console.warn("exchangeCodeForSession error:", error);
 
-      // limpiar URL para no repetir
       url.searchParams.delete("code");
       url.searchParams.delete("state");
       window.history.replaceState({}, document.title, url.toString());
@@ -29,7 +27,7 @@ export async function getSessionUser() {
     }
   }
 
-  // 1) intenta leer sesión local
+  // 1) sesión local
   try {
     const { data: s1, error: e1 } = await supabase.auth.getSession();
     if (e1) console.warn("getSession error:", e1);
@@ -38,7 +36,7 @@ export async function getSessionUser() {
     console.warn("getSession throw:", e);
   }
 
-  // 2) fallback: getUser (a veces getSession tarda)
+  // 2) fallback
   try {
     const { data: u, error: e2 } = await supabase.auth.getUser();
     if (e2) return null;
@@ -56,7 +54,6 @@ export async function requireSession() {
 }
 
 export async function signInWithGoogle() {
-  // En GitHub Pages: volver EXACTO a la ruta actual
   const redirectTo = window.location.origin + window.location.pathname;
 
   const { data, error } = await supabase.auth.signInWithOAuth({
@@ -135,7 +132,8 @@ export async function deleteAllPlayers() {
 }
 
 // ---------------- SESSIONS (Equipos) ----------------
-// ✅ guardado manual (sin ON CONFLICT)
+// ✅ Guardado seguro: UPDATE por key; si no actualiza nada -> INSERT
+// ✅ No falla si hay duplicados (actualiza todos los que existan)
 export async function saveTeamsToHistory(session_date, totalPlayers, teamA, teamB) {
   await requireSession();
 
@@ -150,31 +148,31 @@ export async function saveTeamsToHistory(session_date, totalPlayers, teamA, team
     updated_at: new Date().toISOString()
   };
 
-  const { data: existing, error: e0 } = await supabase
+  // 1) intentar UPDATE primero
+  const { data: upd, error: e1 } = await supabase
     .from("sessions")
-    .select("id")
+    .update(payload)
     .eq("group_code", GROUP_CODE)
     .eq("session_date", date)
-    .maybeSingle();
-  if (e0) throw e0;
+    .select("id"); // para saber si actualizó algo
 
-  if (existing?.id) {
-    const { error: e1 } = await supabase
-      .from("sessions")
-      .update(payload)
-      .eq("id", existing.id);
-    if (e1) throw e1;
+  if (e1) throw e1;
+
+  if (Array.isArray(upd) && upd.length > 0) {
+    // actualizado (1 o múltiples duplicados)
     return;
   }
 
+  // 2) si no existía, INSERT
   const { error: e2 } = await supabase
     .from("sessions")
     .insert(payload);
+
   if (e2) throw e2;
 }
 
 // ---------------- RESULTS (Turnos + Summary) ----------------
-// ✅ guardado manual (sin ON CONFLICT)
+// ✅ Igual: UPDATE por key; si no actualiza -> INSERT
 export async function saveResultsToHistory(session_date, turns, scores, summary) {
   await requireSession();
 
@@ -189,26 +187,23 @@ export async function saveResultsToHistory(session_date, turns, scores, summary)
     updated_at: new Date().toISOString()
   };
 
-  const { data: existing, error: e0 } = await supabase
+  const { data: upd, error: e1 } = await supabase
     .from("results")
-    .select("id")
+    .update(payload)
     .eq("group_code", GROUP_CODE)
     .eq("session_date", date)
-    .maybeSingle();
-  if (e0) throw e0;
+    .select("id");
 
-  if (existing?.id) {
-    const { error: e1 } = await supabase
-      .from("results")
-      .update(payload)
-      .eq("id", existing.id);
-    if (e1) throw e1;
+  if (e1) throw e1;
+
+  if (Array.isArray(upd) && upd.length > 0) {
     return;
   }
 
   const { error: e2 } = await supabase
     .from("results")
     .insert(payload);
+
   if (e2) throw e2;
 }
 
@@ -231,12 +226,15 @@ export async function getHistoryDetail(session_date) {
 
   const date = cleanDate(session_date);
 
+  // Si hay duplicados, agarramos el más “nuevo”
   const { data: sessions, error: e1 } = await supabase
     .from("sessions")
     .select("*")
     .eq("group_code", GROUP_CODE)
     .eq("session_date", date)
+    .order("updated_at", { ascending: false })
     .limit(1);
+
   if (e1) throw e1;
 
   const session = sessions?.[0] || null;
@@ -246,7 +244,9 @@ export async function getHistoryDetail(session_date) {
     .select("*")
     .eq("group_code", GROUP_CODE)
     .eq("session_date", date)
+    .order("updated_at", { ascending: false })
     .limit(1);
+
   if (e2) throw e2;
 
   const results = resultsRows?.[0] || null;
@@ -254,6 +254,7 @@ export async function getHistoryDetail(session_date) {
   return { session, results };
 }
 
+// ✅ BORRAR COMPLETO: borra TODOS los duplicados de esa fecha
 export async function deleteHistoryDate(session_date) {
   await requireSession();
 
