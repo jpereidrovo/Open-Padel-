@@ -1,8 +1,14 @@
 // history.js — Historial por sesión (fecha - n): Equipos + Turnos + Resumen
-// Requiere: supabaseApi.js con listHistorySessions(), getHistoryDetailByKey(), deleteResultsByKey()
+// Incluye: borrar resultados (solo sesión), borrar sesión completa, borrar toda la fecha
 
 import { Store } from "./store.js";
-import { listHistorySessions, getHistoryDetailByKey, deleteResultsByKey } from "./supabaseApi.js";
+import {
+  listHistorySessions,
+  getHistoryDetailByKey,
+  deleteResultsByKey,
+  deleteSessionByKey,
+  deleteHistoryDate
+} from "./supabaseApi.js";
 
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -23,7 +29,7 @@ import { listHistorySessions, getHistoryDetailByKey, deleteResultsByKey } from "
     return d.toLocaleDateString("es-EC", { year: "numeric", month: "long", day: "2-digit" });
   }
 
-  function sessionLabel(row) {
+  function sessionLabelFromRow(row) {
     const d = String(row?.session_date || "").slice(0, 10);
     const n = Number(row?.session_seq || 1);
     return `${niceDate(d)} - ${n}`;
@@ -88,8 +94,7 @@ import { listHistorySessions, getHistoryDetailByKey, deleteResultsByKey } from "
             ${perTurn.map(pt => `
               <div class="hint muted">Turno ${esc(pt.turn)}: A ${esc(pt.aPts)} • B ${esc(pt.bPts)}</div>
             `).join("")}
-          </div>
-        `
+          </div>`
             : ``
         }
       </div>
@@ -114,9 +119,7 @@ import { listHistorySessions, getHistoryDetailByKey, deleteResultsByKey } from "
       <div class="card" style="margin-top:12px;">
         <h3 style="margin:0 0 10px;">Turnos</h3>
 
-        ${turns
-          .map(
-            (t) => `
+        ${turns.map(t => `
           <div class="card" style="background: rgba(0,0,0,.12); margin-bottom:10px;">
             <h4 style="margin:0 0 10px;">Turno ${esc(t.turnIndex ?? t.turn ?? "")}</h4>
 
@@ -131,14 +134,13 @@ import { listHistorySessions, getHistoryDetailByKey, deleteResultsByKey } from "
                   </tr>
                 </thead>
                 <tbody>
-                  ${(t.matches || [])
-                    .map((m) => {
-                      const top = m?.top?.pair || [];
-                      const bot = m?.bottom?.pair || [];
-                      const topTxt = `${esc(top?.[0]?.name || "")} / ${esc(top?.[1]?.name || "")}`;
-                      const botTxt = `${esc(bot?.[0]?.name || "")} / ${esc(bot?.[1]?.name || "")}`;
-                      const scoreTxt = `<b>${esc(formatScore(m?.score))}</b>`;
-                      return `
+                  ${(t.matches || []).map(m => {
+                    const top = m?.top?.pair || [];
+                    const bot = m?.bottom?.pair || [];
+                    const topTxt = `${esc(top?.[0]?.name || "")} / ${esc(top?.[1]?.name || "")}`;
+                    const botTxt = `${esc(bot?.[0]?.name || "")} / ${esc(bot?.[1]?.name || "")}`;
+                    const scoreTxt = `<b>${esc(formatScore(m?.score))}</b>`;
+                    return `
                       <tr>
                         ${cell(`#${esc(m?.court ?? "")}`)}
                         ${cell(topTxt)}
@@ -146,15 +148,12 @@ import { listHistorySessions, getHistoryDetailByKey, deleteResultsByKey } from "
                         ${cell(scoreTxt)}
                       </tr>
                     `;
-                    })
-                    .join("")}
+                  }).join("")}
                 </tbody>
               </table>
             </div>
           </div>
-        `
-          )
-          .join("")}
+        `).join("")}
       </div>
     `;
   }
@@ -163,26 +162,15 @@ import { listHistorySessions, getHistoryDetailByKey, deleteResultsByKey } from "
     const mount = $("historyMount");
     if (!mount) return;
 
-    if (!Store.ready && Store.status !== "loading") {
+    if (!Store.ready) {
       mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint muted">Inicia sesión para ver Historial.</div></div>`;
-      return;
-    }
-    if (Store.status === "loading") {
-      mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint muted">Cargando…</div></div>`;
-      return;
-    }
-    if (Store.status === "error") {
-      const msg = Store.error?.message || "Ocurrió un error.";
-      mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint error">${esc(msg)}</div></div>`;
       return;
     }
 
     mount.innerHTML = `
       <div class="card" style="margin-top:10px;">
         <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">
-          <div>
-            <div class="hint muted">Historial por sesión (fecha - n): Equipos + Turnos + Resultados.</div>
-          </div>
+          <div class="hint muted">Historial por sesión (fecha - n): Equipos + Turnos + Resultados.</div>
           <div class="btns">
             <button class="ghost" id="btnHistoryReload" type="button">Recargar</button>
           </div>
@@ -220,19 +208,17 @@ import { listHistorySessions, getHistoryDetailByKey, deleteResultsByKey } from "
 
     if (!selectedSessionKey) selectedSessionKey = rows[0].session_key;
 
-    listEl.innerHTML = rows
-      .map((r) => {
-        const active = r.session_key === selectedSessionKey;
-        return `
-          <button class="ghost" type="button" data-key="${esc(r.session_key)}"
-            style="${active ? "border-color: rgba(255,255,255,.35);" : ""}">
-            ${esc(sessionLabel(r))}
-          </button>
-        `;
-      })
-      .join("");
+    listEl.innerHTML = rows.map(r => {
+      const active = r.session_key === selectedSessionKey;
+      return `
+        <button class="ghost" type="button" data-key="${esc(r.session_key)}"
+          style="${active ? "border-color: rgba(255,255,255,.35);" : ""}">
+          ${esc(sessionLabelFromRow(r))}
+        </button>
+      `;
+    }).join("");
 
-    listEl.querySelectorAll("[data-key]").forEach((btn) => {
+    listEl.querySelectorAll("[data-key]").forEach(btn => {
       btn.addEventListener("click", async () => {
         selectedSessionKey = btn.getAttribute("data-key");
         await render();
@@ -245,21 +231,22 @@ import { listHistorySessions, getHistoryDetailByKey, deleteResultsByKey } from "
       const { session, results } = await getHistoryDetailByKey(selectedSessionKey);
 
       if (!session) {
-        detailEl.innerHTML = `
-          <div class="card" style="margin-top:12px;">
-            <div class="hint muted">No se encontró la sesión.</div>
-          </div>
-        `;
+        detailEl.innerHTML = `<div class="card" style="margin-top:12px;"><div class="hint muted">No se encontró la sesión.</div></div>`;
         return;
       }
 
+      const sessionDate = String(session.session_date || "").slice(0, 10);
+      const headerLabel = sessionLabelFromRow(session);
+
       detailEl.innerHTML = `
         <div class="card" style="margin-top:12px;">
-          <h2 style="margin:0;">${esc(sessionLabel(session))}</h2>
+          <h2 style="margin:0;">${esc(headerLabel)}</h2>
           <div class="hint muted" style="margin-top:6px;">session_key: <b>${esc(selectedSessionKey)}</b></div>
 
-          <div class="btns" style="margin-top:10px;">
+          <div class="btns" style="margin-top:10px; flex-wrap:wrap;">
             <button class="ghost" id="btnDeleteResults" type="button">Borrar resultados (solo esta sesión)</button>
+            <button class="ghost" id="btnDeleteSession" type="button">Borrar sesión completa</button>
+            <button class="ghost" id="btnDeleteDate" type="button">Borrar TODA la fecha</button>
           </div>
 
           <div id="historyStatus" class="hint muted" style="margin-top:10px;"></div>
@@ -284,20 +271,52 @@ import { listHistorySessions, getHistoryDetailByKey, deleteResultsByKey } from "
         try {
           setStatus("Borrando resultados…", "muted");
           await deleteResultsByKey(selectedSessionKey);
-          setStatus("✅ Resultados borrados. (Equipos intactos)", "ok");
+          setStatus("✅ Resultados borrados (equipos intactos).", "ok");
           await render();
         } catch (e) {
           console.error(e);
           setStatus(`❌ Error borrando resultados: ${esc(e?.message || e)}`, "error");
         }
       });
+
+      $("btnDeleteSession")?.addEventListener("click", async () => {
+        const ok = confirm("Esto borrará la sesión completa (equipos + resultados) de esta sesión. ¿Seguro?");
+        if (!ok) return;
+
+        try {
+          setStatus("Borrando sesión completa…", "muted");
+          await deleteSessionByKey(selectedSessionKey);
+
+          // Al borrar, refresca y elige una nueva si existe
+          selectedSessionKey = null;
+          setStatus("✅ Sesión borrada.", "ok");
+          await render();
+        } catch (e) {
+          console.error(e);
+          setStatus(`❌ Error borrando sesión: ${esc(e?.message || e)}`, "error");
+        }
+      });
+
+      $("btnDeleteDate")?.addEventListener("click", async () => {
+        const ok = confirm(`Esto borrará TODAS las sesiones y resultados del día ${sessionDate}. ¿Seguro?`);
+        if (!ok) return;
+
+        try {
+          setStatus("Borrando toda la fecha…", "muted");
+          await deleteHistoryDate(sessionDate);
+
+          // Al borrar todo el día, esa fecha desaparece del listado si no quedan sesiones
+          selectedSessionKey = null;
+          setStatus("✅ Fecha borrada completamente.", "ok");
+          await render();
+        } catch (e) {
+          console.error(e);
+          setStatus(`❌ Error borrando fecha: ${esc(e?.message || e)}`, "error");
+        }
+      });
     } catch (e) {
       console.error(e);
-      detailEl.innerHTML = `
-        <div class="card" style="margin-top:12px;">
-          <div class="hint error">Error cargando detalle: ${esc(e?.message || e)}</div>
-        </div>
-      `;
+      detailEl.innerHTML = `<div class="card" style="margin-top:12px;"><div class="hint error">Error cargando detalle: ${esc(e?.message || e)}</div></div>`;
     }
 
     $("btnHistoryReload")?.addEventListener("click", async () => {
@@ -306,7 +325,6 @@ import { listHistorySessions, getHistoryDetailByKey, deleteResultsByKey } from "
     });
   }
 
-  // Integración con navegación modular
   window.OP = window.OP || {};
   const prev = window.OP.refresh;
   window.OP.refresh = (view) => {
