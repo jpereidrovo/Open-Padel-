@@ -1,7 +1,7 @@
-// turns.js — Generar turnos + ingresar marcadores (fluido) + PDF + guardar a historial (results)
+// turns.js — Generar turnos + ingresar marcadores + PDFs (fixture y resultados) + guardar historial multi-sesión
 
 import { Store } from "./store.js";
-import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
+import { getHistoryDetailByKey, saveResultsToHistory } from "./supabaseApi.js";
 
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -23,14 +23,12 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
   function scoreDigits(raw) {
     return String(raw || "").replace(/\D/g, "").slice(0, 2);
   }
-
   function formatScore(raw) {
     const digits = scoreDigits(raw);
     if (digits.length === 0) return "";
     if (digits.length === 1) return digits;
     return `${digits[0]}-${digits[1]}`;
   }
-
   function parseScore(raw) {
     const digits = scoreDigits(raw);
     if (digits.length !== 2) return null;
@@ -39,9 +37,8 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     if (Number.isNaN(a) || Number.isNaN(b)) return null;
     if (a < 0 || a > 7 || b < 0 || b > 7) return null;
     if (a === b) return null;
-    return { a, b, digits };
+    return { a, b };
   }
-
   function winnerFromScore(sc) {
     if (!sc) return null;
     return sc.a > sc.b ? "A" : "B";
@@ -84,14 +81,11 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         const BD = shuffle(teamB.filter(p => p.side === "D"));
         const BR = shuffle(teamB.filter(p => p.side === "R"));
 
-        const nA = Math.min(AD.length, AR.length);
-        const nB = Math.min(BD.length, BR.length);
-
         const Ause = [];
         const Buse = [];
 
-        for (let i = 0; i < nA && Ause.length < courts; i++) Ause.push([AD[i], AR[i]]);
-        for (let i = 0; i < nB && Buse.length < courts; i++) Buse.push([BD[i], BR[i]]);
+        for (let i = 0; i < Math.min(AD.length, AR.length) && Ause.length < courts; i++) Ause.push([AD[i], AR[i]]);
+        for (let i = 0; i < Math.min(BD.length, BR.length) && Buse.length < courts; i++) Buse.push([BD[i], BR[i]]);
 
         let newCount = 0;
         for (const p of Ause) if (!usedA.has(pairKey(p))) newCount++;
@@ -153,240 +147,161 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     return { totalA, totalB, perTurn };
   }
 
-  async function ensureTeamsLoaded(dateISO) {
-    const A = Store.state?.team_a || [];
-    const B = Store.state?.team_b || [];
-    if (A.length && B.length) return { A, B };
-
-    const detail = await getHistoryDetail(dateISO);
-    const session = detail?.session;
-    if (!session) throw new Error("No hay equipos guardados en esta fecha. Ve a Equipos y guarda primero.");
-    return { A: session.team_a || [], B: session.team_b || [] };
+  async function ensureSessionLoaded() {
+    // ✅ si ya viene de Equipos guardado, usamos session_key
+    const key = Store.state?.session_key;
+    if (!key) throw new Error("Primero guarda Equipos para crear una sesión (Ej: 2026-01-12-1).");
+    const detail = await getHistoryDetailByKey(key);
+    if (!detail?.session) throw new Error("No encontré la sesión. Ve a Equipos y guarda de nuevo.");
+    return detail;
   }
 
-  // ---------------- PDF ----------------
+  // ---------------- PDF (jsPDF UMD global) ----------------
   function getJsPDF() {
-    // jsPDF UMD: window.jspdf.jsPDF
-    try {
-      return window?.jspdf?.jsPDF || null;
-    } catch {
-      return null;
-    }
+    const jspdf = window.jspdf;
+    if (!jspdf || !jspdf.jsPDF) throw new Error("jsPDF no está cargado. Agrega el script de jsPDF en index.html.");
+    return jspdf.jsPDF;
   }
 
-  function sessionDisplayLabel() {
-    const date = Store.state?.session_date || todayISO();
-    const seq = Store.state?.session_seq || null;
-    const key = Store.state?.session_key || null;
-
-    // Si existe session_key (multi-sesión), mostramos "YYYY-MM-DD - n"
-    if (key) {
-      const parts = String(key).split("-");
-      const n = parts[parts.length - 1] || (seq || "1");
-      return `${date} - ${n}`;
-    }
-    if (seq) return `${date} - ${seq}`;
-    return `${date}`;
+  function pdfNiceDate(dateISO) {
+    const d = new Date(String(dateISO).slice(0,10) + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return String(dateISO).slice(0,10);
+    return d.toLocaleDateString("es-EC", { year: "numeric", month: "short", day: "2-digit" });
   }
 
-  function pdfFileName(withResults) {
-    const safe = sessionDisplayLabel().replaceAll(" ", "").replaceAll("/", "-");
-    return `OpenPadel_${safe}_${withResults ? "Resultados" : "Turnos"}.pdf`;
-  }
+  function makePdf({ mode, session, turns, summary }) {
+    const jsPDF = getJsPDF();
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
 
-  function buildPdf(withResults) {
-    const JsPDF = getJsPDF();
-    if (!JsPDF) {
-      alert("No se cargó jsPDF. Revisa que index.html tenga el script de jsPDF.");
-      return;
+    const pageW = 210, pageH = 297;
+    const margin = 12;
+
+    const line = (x1,y1,x2,y2) => doc.line(x1,y1,x2,y2);
+
+    function box(x, y, w, h, title) {
+      doc.setDrawColor(40);
+      doc.setLineWidth(0.2);
+      doc.rect(x, y, w, h);
+      if (title) {
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.text(title, x + 3, y + 6);
+        doc.setFont("helvetica", "normal");
+      }
     }
 
-    const dateISO = Store.state?.session_date || todayISO();
-    const turns = Array.isArray(Store.state?.turns) ? Store.state.turns : [];
-    const courts = Number(Store.state?.courts || 0);
-
-    if (!turns.length) {
-      alert("No hay turnos para exportar.");
-      return;
+    function text(x, y, s, size=10, bold=false) {
+      doc.setFontSize(size);
+      doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.text(String(s || ""), x, y);
+      doc.setFont("helvetica", "normal");
     }
 
-    if (withResults && !allScoresComplete(turns)) {
-      alert("Completa todos los marcadores para exportar el PDF con resultados.");
-      return;
+    const dateISO = session?.session_date || Store.state?.session_date || todayISO();
+    const key = session?.session_key || Store.state?.session_key || dateISO;
+    const seq = session?.session_seq || Store.state?.session_seq || 1;
+
+    // Header
+    text(margin, 14, "Open Padel — Resumen", 14, true);
+    text(margin, 20, `Fecha: ${pdfNiceDate(dateISO)}   |   Sesión: ${String(dateISO)} - ${seq}`, 10, false);
+    text(margin, 25, `Key: ${key}`, 9, false);
+
+    // Teams box
+    const teamY = 30;
+    box(margin, teamY, pageW - margin*2, 46, "Equipos");
+    const A = session?.team_a || [];
+    const B = session?.team_b || [];
+
+    text(margin + 3, teamY + 14, `Equipo A (${A.length})`, 10, true);
+    text(margin + 100, teamY + 14, `Equipo B (${B.length})`, 10, true);
+
+    const row = (p) => `${p?.name || ""} (${p?.side || ""} ${Number(p?.rating||0).toFixed(1)})`;
+    for (let i = 0; i < 6; i++) {
+      if (A[i]) text(margin + 3, teamY + 20 + i*5, row(A[i]), 9);
+      if (B[i]) text(margin + 100, teamY + 20 + i*5, row(B[i]), 9);
     }
+    if (A.length > 6) text(margin + 3, teamY + 20 + 6*5, `+${A.length-6} más…`, 9);
+    if (B.length > 6) text(margin + 100, teamY + 20 + 6*5, `+${B.length-6} más…`, 9);
 
-    const doc = new JsPDF({ unit: "pt", format: "a4" });
-    const pageW = doc.internal.pageSize.getWidth();
-    const pageH = doc.internal.pageSize.getHeight();
+    // Turns
+    let y = teamY + 52;
 
-    const margin = 42;
-    let y = margin;
+    const turnsTitle = mode === "fixture" ? "Turnos (Fixture)" : "Turnos (Resultados)";
+    box(margin, y, pageW - margin*2, 10, turnsTitle);
+    y += 14;
 
-    const line = (x1, y1, x2, y2) => doc.line(x1, y1, x2, y2);
+    const maxW = pageW - margin*2;
 
-    const addHeader = () => {
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(16);
-      doc.text("Open Padel", margin, y);
+    for (const t of (turns || [])) {
+      // salto de página si no entra
+      if (y > pageH - 35) {
+        doc.addPage();
+        y = 16;
+      }
 
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(11);
-      const subtitle = withResults ? "Resumen de turnos + resultados" : "Resumen de turnos (sin resultados)";
-      doc.text(subtitle, margin, y + 16);
-
-      doc.setFontSize(10);
-      doc.setTextColor(80);
-      doc.text(`Sesión: ${sessionDisplayLabel()}`, margin, y + 34);
-      doc.text(`Fecha: ${dateISO}`, margin + 250, y + 34);
-
-      doc.setTextColor(0);
-      y += 52;
-
-      doc.setDrawColor(180);
-      line(margin, y, pageW - margin, y);
-      y += 16;
-    };
-
-    const ensureSpace = (need = 80) => {
-      if (y + need < pageH - margin) return;
-      doc.addPage();
-      y = margin;
-      addMiniHeader();
-    };
-
-    const addMiniHeader = () => {
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text(`Open Padel • Sesión ${sessionDisplayLabel()}`, margin, y);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      doc.setTextColor(90);
-      doc.text(withResults ? "Resultados" : "Turnos", pageW - margin, y, { align: "right" });
-      doc.setTextColor(0);
-      y += 16;
-      doc.setDrawColor(210);
-      line(margin, y, pageW - margin, y);
-      y += 14;
-    };
-
-    addHeader();
-
-    // Resumen arriba (solo si con resultados)
-    if (withResults) {
-      const summary = computeSummary(turns);
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(12);
-      doc.text("Resumen global", margin, y);
-      y += 16;
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(11);
-      doc.text(`Equipo A: ${summary.totalA} puntos`, margin, y);
-      doc.text(`Equipo B: ${summary.totalB} puntos`, margin + 220, y);
-      y += 14;
-
-      doc.setFontSize(10);
-      doc.setTextColor(80);
-      doc.text(`Canchas: ${courts} • Turnos: ${turns.length}`, margin, y);
-      doc.setTextColor(0);
-      y += 18;
-
-      doc.setDrawColor(220);
-      line(margin, y, pageW - margin, y);
-      y += 16;
-    } else {
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      doc.setTextColor(80);
-      doc.text(`Canchas: ${courts} • Turnos: ${turns.length}`, margin, y);
-      doc.setTextColor(0);
-      y += 18;
-
-      doc.setDrawColor(220);
-      line(margin, y, pageW - margin, y);
-      y += 16;
-    }
-
-    // Tablas por turno (formato compacto)
-    for (const t of turns) {
-      ensureSpace(120);
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(12);
-      doc.text(`Turno ${t.turnIndex}`, margin, y);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      doc.setTextColor(90);
-      doc.text(`${courts} canchas`, margin + 90, y);
-      doc.setTextColor(0);
+      box(margin, y, maxW, 8, `Turno ${t.turnIndex}`);
       y += 12;
 
-      // Encabezado tabla
-      const col1 = margin;
-      const col2 = margin + 50;
-      const col3 = margin + 280;
-      const col4 = pageW - margin;
-
-      doc.setFont("helvetica", "bold");
+      // table header
       doc.setFontSize(9);
-      doc.setTextColor(80);
-      doc.text("Cancha", col1, y);
-      doc.text("Equipo A (arriba)", col2, y);
-      doc.text("Equipo B (abajo)", col3, y);
-      doc.text(withResults ? "Marcador" : "—", col4, y, { align: "right" });
-      doc.setTextColor(0);
-      y += 10;
-
-      doc.setDrawColor(210);
-      line(margin, y, pageW - margin, y);
-      y += 10;
-
+      doc.setFont("helvetica", "bold");
+      text(margin + 3, y, "Cancha", 9, true);
+      text(margin + 22, y, "Equipo A (arriba)", 9, true);
+      text(margin + 110, y, "Equipo B (abajo)", 9, true);
+      text(margin + 182, y, "Score", 9, true);
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
+      y += 5;
+      line(margin, y, margin + maxW, y);
+      y += 5;
 
       for (const m of (t.matches || [])) {
-        ensureSpace(64);
-
         const top = m?.top?.pair || [];
         const bot = m?.bottom?.pair || [];
-
         const topTxt = `${top?.[0]?.name || ""} / ${top?.[1]?.name || ""}`;
         const botTxt = `${bot?.[0]?.name || ""} / ${bot?.[1]?.name || ""}`;
 
-        const scoreTxt = withResults ? formatScore(m?.scoreRaw || m?.score || "") : "";
+        const sc = mode === "results" ? formatScore(m.scoreRaw || m.score) : "";
+        const scShow = sc || "—";
 
-        doc.text(`#${String(m.court || "")}`, col1, y);
+        text(margin + 3, y, `#${m.court}`, 9);
+        text(margin + 22, y, topTxt, 9);
+        text(margin + 110, y, botTxt, 9);
+        text(margin + 182, y, scShow, 9, mode === "results");
 
-        // wrap manual simple (dos líneas max)
-        const maxW = col3 - col2 - 10;
-        const topLines = doc.splitTextToSize(topTxt, maxW);
-        const botLines = doc.splitTextToSize(botTxt, maxW);
+        y += 6;
 
-        doc.text(topLines.slice(0, 2), col2, y);
-        doc.text(botLines.slice(0, 2), col3, y);
-
-        if (withResults) doc.text(scoreTxt || "—", col4, y, { align: "right" });
-
-        y += 16;
-
-        doc.setDrawColor(235);
-        line(margin, y, pageW - margin, y);
-        y += 10;
+        if (y > pageH - 25) {
+          doc.addPage();
+          y = 16;
+        }
       }
 
-      y += 6;
+      y += 4;
     }
 
-    // Footer
-    ensureSpace(60);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.setTextColor(110);
-    doc.text(`Generado: ${new Date().toLocaleString("es-EC")}`, margin, pageH - margin);
-    doc.setTextColor(0);
+    // Summary box
+    if (mode === "results") {
+      if (y > pageH - 40) {
+        doc.addPage();
+        y = 16;
+      }
 
-    doc.save(pdfFileName(withResults));
+      const sum = summary || { totalA: 0, totalB: 0, perTurn: [] };
+      box(margin, y, maxW, 34, "Resumen Global");
+      text(margin + 3, y + 14, `Equipo A: ${sum.totalA} puntos`, 11, true);
+      text(margin + 3, y + 20, `Equipo B: ${sum.totalB} puntos`, 11, true);
+
+      const per = Array.isArray(sum.perTurn) ? sum.perTurn : [];
+      const lines = per.slice(0, 4).map(pt => `Turno ${pt.turn}: A ${pt.aPts} • B ${pt.bPts}`);
+      for (let i=0;i<lines.length;i++) text(margin + 100, y + 14 + i*6, lines[i], 9);
+    }
+
+    const filename =
+      mode === "fixture"
+        ? `OpenPadel_${String(dateISO)}-${seq}_fixture.pdf`
+        : `OpenPadel_${String(dateISO)}-${seq}_resultados.pdf`;
+
+    doc.save(filename);
   }
 
   // ---------------- UI ----------------
@@ -399,7 +314,10 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       return;
     }
 
+    const key = Store.state?.session_key || null;
     const date = Store.state?.session_date || todayISO();
+    const seq = Store.state?.session_seq || 1;
+
     const turnsState = Array.isArray(Store.state?.turns) ? Store.state.turns : [];
     const courts = Store.state?.courts || 0;
 
@@ -407,9 +325,10 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       <div class="card" style="margin-top:10px;">
         <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:end; justify-content:space-between;">
           <div>
-            <label>Fecha</label>
-            <input id="turnsDate" type="date" value="${esc(date)}" />
-            <div class="hint muted" style="margin-top:6px;">Sesión actual: <b>${esc(sessionDisplayLabel())}</b></div>
+            <label>Sesión</label>
+            <div class="hint muted" style="margin-top:6px;">
+              ${key ? `Activa: <b>${esc(String(date))} - ${esc(String(seq))}</b> (${esc(String(key))})` : "No hay sesión activa. Ve a Equipos y guarda una sesión."}
+            </div>
           </div>
 
           <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
@@ -421,8 +340,10 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
             </div>
 
             <div class="btns">
-              <button class="ghost" id="btnGenTurns" type="button">Generar turnos</button>
-              <button class="primary" id="btnSaveTurns" type="button" disabled>Guardar resultados</button>
+              <button class="ghost" id="btnGenTurns" ${key ? "" : "disabled"}>Generar turnos</button>
+              <button class="ghost" id="btnPdfFixture" ${turnsState.length ? "" : "disabled"}>PDF (fixture)</button>
+              <button class="ghost" id="btnPdfResults" ${allScoresComplete(turnsState) ? "" : "disabled"}>PDF (resultados)</button>
+              <button class="primary" id="btnSaveTurns" ${allScoresComplete(turnsState) ? "" : "disabled"}>Guardar resultados</button>
             </div>
           </div>
         </div>
@@ -430,7 +351,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         <div id="turnsStatus" class="hint muted" style="margin-top:10px;"></div>
       </div>
 
-      <div id="turnsPdfPanel"></div>
       <div id="turnsTable"></div>
       <div id="turnsResults"></div>
     `;
@@ -441,57 +361,22 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       statusEl.className = "hint " + cls;
     };
 
-    $("turnsDate")?.addEventListener("change", (e) => {
-      Store.setState({ session_date: e.target.value });
-    });
-
-    const pdfPanel = $("turnsPdfPanel");
     const table = $("turnsTable");
     const results = $("turnsResults");
     const btnSave = $("btnSaveTurns");
-
-    function renderPdfPanel() {
-      if (!pdfPanel) return;
-
-      if (!turnsState.length) {
-        pdfPanel.innerHTML = "";
-        return;
-      }
-
-      const canPdfWithResults = allScoresComplete(turnsState);
-
-      pdfPanel.innerHTML = `
-        <div class="card" style="margin-top:12px;">
-          <h3 style="margin:0 0 8px;">PDF</h3>
-          <div class="hint muted">Exporta un resumen sencillo y elegante. El PDF con resultados se habilita cuando completes todos los marcadores.</div>
-
-          <div class="btns" style="margin-top:10px; flex-wrap:wrap;">
-            <button class="ghost" id="btnPdfTurns" type="button">Descargar PDF (turnos)</button>
-            <button class="ghost" id="btnPdfResults" type="button" ${canPdfWithResults ? "" : "disabled"}>
-              Descargar PDF (resultados)
-            </button>
-          </div>
-
-          <div class="hint muted" style="margin-top:10px;">
-            Sesión: <b>${esc(sessionDisplayLabel())}</b> • Turnos: <b>${esc(turnsState.length)}</b> • Canchas: <b>${esc(courts)}</b>
-          </div>
-        </div>
-      `;
-
-      $("btnPdfTurns")?.addEventListener("click", () => buildPdf(false));
-      $("btnPdfResults")?.addEventListener("click", () => buildPdf(true));
-    }
+    const btnPdfFixture = $("btnPdfFixture");
+    const btnPdfResults = $("btnPdfResults");
 
     function updateResultsUI() {
-      renderPdfPanel();
-
       if (!turnsState.length) {
         results.innerHTML = "";
         btnSave.disabled = true;
+        if (btnPdfFixture) btnPdfFixture.disabled = true;
+        if (btnPdfResults) btnPdfResults.disabled = true;
         return;
       }
-
       const summary = computeSummary(turnsState);
+
       results.innerHTML = `
         <div class="card" style="margin-top:12px;">
           <h3 style="margin:0 0 10px;">Resultados</h3>
@@ -506,16 +391,19 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         </div>
       `;
 
-      btnSave.disabled = !allScoresComplete(turnsState);
+      const complete = allScoresComplete(turnsState);
+      btnSave.disabled = !complete;
+      if (btnPdfFixture) btnPdfFixture.disabled = false;
+      if (btnPdfResults) btnPdfResults.disabled = !complete;
     }
 
     function drawTurnsUI() {
-      renderPdfPanel();
-
       if (!turnsState.length) {
         table.innerHTML = `<div class="card" style="margin-top:12px;"><div class="hint muted">Aún no hay turnos generados.</div></div>`;
         results.innerHTML = "";
         btnSave.disabled = true;
+        if (btnPdfFixture) btnPdfFixture.disabled = true;
+        if (btnPdfResults) btnPdfResults.disabled = true;
         return;
       }
 
@@ -577,7 +465,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         </div>
       `).join("");
 
-      // Manejo fluido: NO render() en cada tecla
       table.querySelectorAll("[data-score]").forEach(inp => {
         inp.addEventListener("input", () => {
           const digits = scoreDigits(inp.value);
@@ -593,7 +480,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
           turn.matches[mIndex].scoreRaw = digits;
 
-          // Actualizar formato + ganador en la fila (sin re-render)
           const fmtEl = table.querySelector(`[data-scorefmt="${CSS.escape(key)}"]`);
           if (fmtEl) fmtEl.textContent = formatScore(digits);
 
@@ -622,19 +508,26 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       try {
         setStatus("Generando turnos…", "muted");
 
-        const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
         const numTurns = Number($("turnCount")?.value || 3);
 
-        const { A, B } = await ensureTeamsLoaded(dateISO);
+        // trae sesión por key (no mezcla)
+        const detail = await ensureSessionLoaded();
+        const session = detail.session;
+
+        const A = session.team_a || [];
+        const B = session.team_b || [];
         const gen = generateTurns(A, B, numTurns);
 
         Store.setState({
-          session_date: dateISO,
+          session_date: session.session_date || date,
+          session_seq: session.session_seq || seq,
+          session_key: session.session_key || key,
           courts: gen.courts,
-          turns: gen.turns
+          turns: gen.turns,
+          summary: null,
         });
 
-        setStatus("✅ Turnos generados. Ya puedes exportar PDF de turnos.", "ok");
+        setStatus("✅ Turnos generados. Completa marcadores para guardar.", "ok");
         render();
       } catch (e) {
         console.error(e);
@@ -644,10 +537,15 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
     $("btnSaveTurns")?.addEventListener("click", async () => {
       try {
-        const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
         const t = Array.isArray(Store.state?.turns) ? Store.state.turns : [];
         if (!t.length) throw new Error("No hay turnos para guardar.");
         if (!allScoresComplete(t)) throw new Error("Completa todos los marcadores (2 dígitos 0–7, sin empates).");
+
+        const session_key = Store.state?.session_key;
+        const session_date = Store.state?.session_date || todayISO();
+        const session_seq = Store.state?.session_seq || 1;
+
+        if (!session_key) throw new Error("No hay sesión activa. Ve a Equipos y guarda una sesión.");
 
         setStatus("Guardando resultados en historial…", "muted");
 
@@ -664,20 +562,58 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         }));
 
         const scoresPayload = { generatedAt: new Date().toISOString() };
-
         const summaryPayload = {
           totalA: summary.totalA,
           totalB: summary.totalB,
           perTurn: summary.perTurn
         };
 
-        // Por ahora: guarda por fecha (si luego quieres amarrarlo a session_key/seq, lo ajustamos)
-        await saveResultsToHistory(dateISO, turnsPayload, scoresPayload, summaryPayload);
+        await saveResultsToHistory(session_key, session_date, session_seq, turnsPayload, scoresPayload, summaryPayload);
 
-        setStatus("✅ Resultados guardados. Ya puedes exportar PDF de resultados.", "ok");
+        Store.setState({ summary: summaryPayload });
+
+        setStatus("✅ Resultados guardados. (Sesión estable, sin mezclar)", "ok");
+        updateResultsUI();
       } catch (e) {
         console.error(e);
         setStatus(`❌ Error al guardar resultados: ${e?.message || e}`, "error");
+      }
+    });
+
+    $("btnPdfFixture")?.addEventListener("click", async () => {
+      try {
+        const key = Store.state?.session_key;
+        if (!key) throw new Error("No hay sesión activa. Ve a Equipos y guarda una sesión.");
+
+        const detail = await getHistoryDetailByKey(key);
+        const session = detail.session;
+        const turns = Array.isArray(Store.state?.turns) ? Store.state.turns : [];
+        if (!turns.length) throw new Error("Primero genera turnos.");
+
+        makePdf({ mode: "fixture", session, turns, summary: null });
+      } catch (e) {
+        console.error(e);
+        setStatus(`❌ PDF: ${e?.message || e}`, "error");
+      }
+    });
+
+    $("btnPdfResults")?.addEventListener("click", async () => {
+      try {
+        const key = Store.state?.session_key;
+        if (!key) throw new Error("No hay sesión activa. Ve a Equipos y guarda una sesión.");
+
+        const detail = await getHistoryDetailByKey(key);
+        const session = detail.session;
+        const turns = Array.isArray(Store.state?.turns) ? Store.state.turns : [];
+        if (!turns.length) throw new Error("Primero genera turnos.");
+        if (!allScoresComplete(turns)) throw new Error("Completa todos los marcadores para PDF de resultados.");
+
+        const summary = computeSummary(turns);
+        makePdf({ mode: "results", session, turns, summary });
+
+      } catch (e) {
+        console.error(e);
+        setStatus(`❌ PDF: ${e?.message || e}`, "error");
       }
     });
   }
