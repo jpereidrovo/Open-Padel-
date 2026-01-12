@@ -1,4 +1,5 @@
-// app.js — Open Padel bootstrap (login a prueba de fallos con window.OP_LOGIN/OP_LOGOUT)
+// app.js — Open Padel bootstrap
+// OBJETIVO: Auth SIEMPRE funciona aunque fallen módulos (db/teams/turns/history)
 
 import { supabase } from "./supabaseClient.js";
 import { Store } from "./store.js";
@@ -53,7 +54,7 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     }
   }
 
-  // ✅ DEFINITIVO: funciones globales para onclick (aunque fallen imports de módulos)
+  // ✅ AUTH blindado: funciones globales (botones siempre sirven)
   window.OP_LOGIN = async () => {
     try {
       setSpinner(true);
@@ -136,7 +137,7 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     showView("base");
   }
 
-  // ✅ PKCE exchange solo si hay ?code=
+  // ✅ exchange PKCE solo si hay ?code=
   async function exchangeCodeIfPresent() {
     const url = new URL(window.location.href);
     const code = url.searchParams.get("code");
@@ -192,6 +193,7 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
       setText("authStatusText", `✅ Conectado: ${user.email || user.id}`);
       setText("authStatus", "Conectado ✅");
 
+      // carga players solo si cambió usuario o aún no está listo
       if (!Store.ready || lastUserId !== user.id) {
         lastUserId = user.id;
         const players = await listPlayers();
@@ -205,16 +207,27 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
       setDot("bad");
       setText("authStatusText", "❌ Error verificando sesión.");
       setText("authStatus", e?.message || String(e));
+
       Store.ready = false;
       lastUserId = null;
       setUserUI(null);
+
       if (loginBtn) loginBtn.disabled = false;
       if (logoutBtn) logoutBtn.disabled = true;
     }
   }
 
+  // ✅ IMPORTS SEGUROS: si un módulo falla, NO tumba el login
   async function safeImport(path) {
-    try { await import(path); } catch (e) { console.error("❌ import", path, e); }
+    try { await import(path); }
+    catch (e) { console.error("❌ import failed:", path, e); }
+  }
+
+  function wireTabChecks() {
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") refreshSessionUI("tab visible").catch(console.error);
+    });
+    window.addEventListener("focus", () => refreshSessionUI("focus").catch(console.error));
   }
 
   let started = false;
@@ -223,6 +236,7 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     started = true;
 
     initNavigation();
+    wireTabChecks();
 
     try {
       await exchangeCodeIfPresent();
@@ -234,19 +248,19 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
       setText("authStatus", e?.message || String(e));
     }
 
-    // módulos primero
+    // Módulos (no pueden romper auth)
     await safeImport("./db.js");
     await safeImport("./teams.js");
     await safeImport("./turns.js");
     await safeImport("./history.js");
 
-    // auth event
+    // cambios reales de sesión
     supabase.auth.onAuthStateChange((event) => {
       refreshSessionUI(`auth:${event}`).catch(console.error);
     });
 
     await refreshSessionUI("init");
-    console.log("✅ app.js listo");
+    console.log("✅ app.js listo (auth blindado)");
   }
 
   if (document.readyState === "loading") {
