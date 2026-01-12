@@ -1,4 +1,4 @@
-// teams.js — Equipos (pool -> A/B) + guardar a historial (sessions) con multi-sesión
+// teams.js — Equipos (pool -> A/B) + edición manual + guardar a historial (sessions) con multi-sesión
 
 import { Store } from "./store.js";
 import { saveTeamsToHistory } from "./supabaseApi.js";
@@ -36,12 +36,40 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
     return (Store.players || []).filter((p) => poolIds.has(p.id));
   }
 
+  function byRatingDesc(a, b) {
+    return Number(b.rating || 0) - Number(a.rating || 0);
+  }
+
+  function uniqById(list) {
+    const seen = new Set();
+    const out = [];
+    for (const p of list || []) {
+      if (!p?.id) continue;
+      if (seen.has(p.id)) continue;
+      seen.add(p.id);
+      out.push(p);
+    }
+    return out;
+  }
+
+  function setTeams(teamA, teamB) {
+    const A = uniqById(teamA || []);
+    const B = uniqById(teamB || []);
+
+    // Evitar que un jugador exista en ambos equipos
+    const aIds = new Set(A.map((p) => p.id));
+    const Bclean = B.filter((p) => !aIds.has(p.id));
+
+    Store.setState({ team_a: A, team_b: Bclean });
+  }
+
   function splitBySide(list) {
-    const D = list.filter((p) => p.side === "D").sort((a, b) => Number(b.rating) - Number(a.rating));
-    const R = list.filter((p) => p.side === "R").sort((a, b) => Number(b.rating) - Number(a.rating));
+    const D = list.filter((p) => p.side === "D").sort(byRatingDesc);
+    const R = list.filter((p) => p.side === "R").sort(byRatingDesc);
     return { D, R };
   }
 
+  // Auto-balance simple (igual que antes)
   function autoBalanceTeams(poolPlayers) {
     const { D, R } = splitBySide(poolPlayers);
 
@@ -91,21 +119,13 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
     const mount = $("teamsMount");
     if (!mount) return;
 
-    if (!Store.ready && Store.status !== "loading") {
+    if (!Store.ready) {
       mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint muted">Inicia sesión para usar Equipos.</div></div>`;
       return;
     }
-    if (Store.status === "loading") {
-      mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint muted">Cargando…</div></div>`;
-      return;
-    }
-    if (Store.status === "error") {
-      const msg = Store.error?.message || "Ocurrió un error.";
-      mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint error">${esc(msg)}</div></div>`;
-      return;
-    }
 
-    const poolPlayers = getPoolPlayers();
+    const poolPlayers = getPoolPlayers().slice().sort(byRatingDesc);
+
     const session_date = Store.state?.session_date || todayISO();
     const session_seq = Store.state?.session_seq || null;
     const session_key = Store.state?.session_key || null;
@@ -113,17 +133,27 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
     const teamA = Array.isArray(Store.state?.team_a) ? Store.state.team_a : [];
     const teamB = Array.isArray(Store.state?.team_b) ? Store.state.team_b : [];
 
-    const aAvg = avgRating(teamA).toFixed(2);
-    const bAvg = avgRating(teamB).toFixed(2);
+    const A = uniqById(teamA).slice().sort(byRatingDesc);
+    const B = uniqById(teamB).slice().sort(byRatingDesc);
 
-    const aD = countSide(teamA, "D"),
-      aR = countSide(teamA, "R");
-    const bD = countSide(teamB, "D"),
-      bR = countSide(teamB, "R");
+    // disponibles = pool - (A∪B)
+    const used = new Set([...A, ...B].map((p) => p.id));
+    const available = poolPlayers.filter((p) => !used.has(p.id));
+
+    const aAvg = avgRating(A).toFixed(2);
+    const bAvg = avgRating(B).toFixed(2);
+
+    const aD = countSide(A, "D"),
+      aR = countSide(A, "R");
+    const bD = countSide(B, "D"),
+      bR = countSide(B, "R");
 
     const sessionLabel = session_key
       ? `Sesión actual: ${esc(session_date)} - ${esc(session_seq || session_key.split("-").pop())}`
       : "Sesión actual: — (aún no guardada)";
+
+    const rowSmall = (p) =>
+      `<span class="hint muted">${esc(p.side)} • ${Number(p.rating || 0).toFixed(1)}</span>`;
 
     mount.innerHTML = `
       <div class="card" style="margin-top:10px;">
@@ -145,18 +175,49 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       </div>
 
       <div class="card" style="margin-top:12px;">
-        <h3 style="margin:0 0 10px;">Pool (${poolPlayers.length})</h3>
-        <div class="hint muted">Debe ser múltiplo de 4 y con igual cantidad D/R.</div>
-        <div style="max-height:260px; overflow:auto; margin-top:10px;">
-          ${
-            poolPlayers.length
-              ? poolPlayers
-                  .map(
-                    (p) => `<div class="hint muted">• ${esc(p.name)} — ${esc(p.side)} — ${Number(p.rating || 0).toFixed(1)}</div>`
-                  )
-                  .join("")
-              : `<div class="hint muted">No hay jugadores en el pool. Selecciónalos en Base.</div>`
-          }
+        <h3 style="margin:0 0 10px;">Edición manual</h3>
+        <div class="hint muted">Agrega/quita jugadores desde el pool y mueve entre A ↔ B.</div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-top:10px;">
+          <div class="card" style="background: rgba(0,0,0,.12);">
+            <h4 style="margin:0 0 8px;">Pool disponible (${available.length})</h4>
+            <div class="hint muted">Son los del pool que todavía no están en A/B.</div>
+            <div style="max-height:260px; overflow:auto; margin-top:10px; display:grid; gap:6px;">
+              ${
+                available.length
+                  ? available
+                      .map(
+                        (p) => `
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                  <div>
+                    <b>${esc(p.name)}</b> ${rowSmall(p)}
+                  </div>
+                  <div class="btns">
+                    <button class="ghost" type="button" data-add="A:${esc(p.id)}">+A</button>
+                    <button class="ghost" type="button" data-add="B:${esc(p.id)}">+B</button>
+                  </div>
+                </div>`
+                      )
+                      .join("")
+                  : `<div class="hint muted">—</div>`
+              }
+            </div>
+          </div>
+
+          <div class="card" style="background: rgba(0,0,0,.12);">
+            <h4 style="margin:0 0 8px;">Pool seleccionado (${poolPlayers.length})</h4>
+            <div style="max-height:260px; overflow:auto; margin-top:10px;">
+              ${
+                poolPlayers.length
+                  ? poolPlayers
+                      .map(
+                        (p) => `<div class="hint muted">• ${esc(p.name)} — ${esc(p.side)} — ${Number(p.rating || 0).toFixed(1)}</div>`
+                      )
+                      .join("")
+                  : `<div class="hint muted">No hay jugadores en el pool. Selecciónalos en Base.</div>`
+              }
+            </div>
+          </div>
         </div>
       </div>
 
@@ -166,12 +227,24 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
           <div class="card" style="background: rgba(0,0,0,.12);">
             <h4 style="margin:0 0 8px;">Equipo A</h4>
-            <div class="hint muted">Promedio: <b>${esc(aAvg)}</b> • D:${esc(aD)} R:${esc(aR)}</div>
-            <div style="margin-top:10px;">
+            <div class="hint muted">Promedio: <b>${esc(aAvg)}</b> • D:${esc(aD)} R:${esc(aR)} • Total:${esc(A.length)}</div>
+
+            <div style="margin-top:10px; display:grid; gap:6px;">
               ${
-                teamA.length
-                  ? teamA
-                      .map((p) => `<div class="hint muted">${esc(p.name)} • ${esc(p.side)} • ${Number(p.rating || 0).toFixed(1)}</div>`)
+                A.length
+                  ? A
+                      .map(
+                        (p) => `
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                  <div>
+                    <b>${esc(p.name)}</b> ${rowSmall(p)}
+                  </div>
+                  <div class="btns">
+                    <button class="ghost" type="button" data-move="AtoB:${esc(p.id)}">→B</button>
+                    <button class="ghost" type="button" data-remove="A:${esc(p.id)}">Quitar</button>
+                  </div>
+                </div>`
+                      )
                       .join("")
                   : `<div class="hint muted">—</div>`
               }
@@ -180,12 +253,24 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
 
           <div class="card" style="background: rgba(0,0,0,.12);">
             <h4 style="margin:0 0 8px;">Equipo B</h4>
-            <div class="hint muted">Promedio: <b>${esc(bAvg)}</b> • D:${esc(bD)} R:${esc(bR)}</div>
-            <div style="margin-top:10px;">
+            <div class="hint muted">Promedio: <b>${esc(bAvg)}</b> • D:${esc(bD)} R:${esc(bR)} • Total:${esc(B.length)}</div>
+
+            <div style="margin-top:10px; display:grid; gap:6px;">
               ${
-                teamB.length
-                  ? teamB
-                      .map((p) => `<div class="hint muted">${esc(p.name)} • ${esc(p.side)} • ${Number(p.rating || 0).toFixed(1)}</div>`)
+                B.length
+                  ? B
+                      .map(
+                        (p) => `
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                  <div>
+                    <b>${esc(p.name)}</b> ${rowSmall(p)}
+                  </div>
+                  <div class="btns">
+                    <button class="ghost" type="button" data-move="BtoA:${esc(p.id)}">←A</button>
+                    <button class="ghost" type="button" data-remove="B:${esc(p.id)}">Quitar</button>
+                  </div>
+                </div>`
+                      )
                       .join("")
                   : `<div class="hint muted">—</div>`
               }
@@ -202,6 +287,7 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       statusEl.className = "hint " + cls;
     };
 
+    // Fecha
     $("teamsDate")?.addEventListener("change", (e) => {
       Store.setState({
         session_date: e.target.value,
@@ -211,41 +297,40 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       render();
     });
 
+    // Autoarmar
     $("btnAutoTeams")?.addEventListener("click", () => {
       try {
-        const pool = getPoolPlayers();
-        if (!pool.length) throw new Error("No hay jugadores en el pool. Selecciónalos en Base.");
-
-        const { teamA: A, teamB: B } = autoBalanceTeams(pool);
-
-        Store.setState({ team_a: A, team_b: B });
-        setStatus("✅ Equipos autoarmados.", "ok");
+        if (!poolPlayers.length) throw new Error("No hay jugadores en el pool. Selecciónalos en Base.");
+        const { teamA: AA, teamB: BB } = autoBalanceTeams(poolPlayers);
+        setTeams(AA, BB);
+        setStatus("✅ Equipos autoarmados. Puedes ajustar manualmente.", "ok");
         render();
       } catch (e) {
         setStatus(`❌ ${e?.message || e}`, "error");
       }
     });
 
+    // Limpiar
     $("btnClearTeams")?.addEventListener("click", () => {
       Store.setState({ team_a: [], team_b: [], session_key: null, session_seq: null });
       setStatus("Listo. Equipos limpiados.", "muted");
       render();
     });
 
+    // Guardar (siempre crea nueva sesión)
     $("btnSaveTeams")?.addEventListener("click", async () => {
       try {
         const date = $("teamsDate")?.value || Store.state?.session_date || todayISO();
-        const A = Store.state?.team_a || [];
-        const B = Store.state?.team_b || [];
+        const AA = Store.state?.team_a || [];
+        const BB = Store.state?.team_b || [];
 
-        if (!A.length || !B.length) throw new Error("Primero arma los equipos A/B.");
-        if ((A.length + B.length) % 4 !== 0) throw new Error("Total de jugadores debe ser múltiplo de 4.");
+        if (!AA.length || !BB.length) throw new Error("Primero arma los equipos A/B.");
+        if ((AA.length + BB.length) % 4 !== 0) throw new Error("Total de jugadores debe ser múltiplo de 4.");
 
         setStatus("Guardando equipos (nueva sesión)…", "muted");
 
-        const saved = await saveTeamsToHistory(date, A.length + B.length, A, B);
+        const saved = await saveTeamsToHistory(date, AA.length + BB.length, AA, BB);
 
-        // Guarda la sesión creada en el estado para que Turnos use la misma
         Store.setState({
           session_date: date,
           session_key: saved.session_key,
@@ -259,6 +344,76 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
         setStatus(`❌ Error al guardar equipos: ${e?.message || e}`, "error");
       }
     });
+
+    // ------- Handlers edición manual -------
+    // Add from available -> A/B
+    mount.querySelectorAll("[data-add]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const val = btn.getAttribute("data-add") || "";
+        const [team, id] = val.split(":");
+        const p = poolPlayers.find((x) => x.id === id);
+        if (!p) return;
+
+        const curA = uniqById(Store.state?.team_a || []);
+        const curB = uniqById(Store.state?.team_b || []);
+
+        // Si ya está en alguno, no duplicar
+        const inA = curA.some((x) => x.id === id);
+        const inB = curB.some((x) => x.id === id);
+        if (inA || inB) return;
+
+        if (team === "A") curA.push(p);
+        else curB.push(p);
+
+        setTeams(curA, curB);
+        render();
+      });
+    });
+
+    // Remove from team -> vuelve a disponible (solo lo quita del equipo)
+    mount.querySelectorAll("[data-remove]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const val = btn.getAttribute("data-remove") || "";
+        const [team, id] = val.split(":");
+
+        const curA = uniqById(Store.state?.team_a || []);
+        const curB = uniqById(Store.state?.team_b || []);
+
+        if (team === "A") setTeams(curA.filter((x) => x.id !== id), curB);
+        else setTeams(curA, curB.filter((x) => x.id !== id));
+
+        render();
+      });
+    });
+
+    // Move A <-> B
+    mount.querySelectorAll("[data-move]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const val = btn.getAttribute("data-move") || "";
+        const [dir, id] = val.split(":");
+
+        const curA = uniqById(Store.state?.team_a || []);
+        const curB = uniqById(Store.state?.team_b || []);
+
+        if (dir === "AtoB") {
+          const p = curA.find((x) => x.id === id);
+          if (!p) return;
+          const newA = curA.filter((x) => x.id !== id);
+          const newB = curB.some((x) => x.id === id) ? curB : [...curB, p];
+          setTeams(newA, newB);
+        } else if (dir === "BtoA") {
+          const p = curB.find((x) => x.id === id);
+          if (!p) return;
+          const newB = curB.filter((x) => x.id !== id);
+          const newA = curA.some((x) => x.id === id) ? curA : [...curA, p];
+          setTeams(newA, newB);
+        }
+
+        render();
+      });
+    });
+
+    setStatus("✅ Teams listo. Autoarmar o ajusta manualmente.", "muted");
   }
 
   // Integración con navegación
