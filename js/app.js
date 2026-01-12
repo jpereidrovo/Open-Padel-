@@ -1,10 +1,9 @@
-// app.js — Open Padel bootstrap (robusto, no se rompe si faltan botones)
+// app.js — Open Padel bootstrap (PKCE robusto para GitHub Pages)
 
 import { supabase } from "./supabaseClient.js";
 import { Store } from "./store.js";
 import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supabaseApi.js";
 
-// ✅ Cargar módulos (se ejecutan solos y pintan sus pantallas)
 import "./db.js";
 import "./teams.js";
 import "./turns.js";
@@ -42,7 +41,6 @@ import "./history.js";
       view === "turns" ? "navTurns" : "navHistory"
     );
 
-    // avisar a módulos
     window.OP = window.OP || {};
     if (typeof window.OP.refresh === "function") window.OP.refresh(view);
   }
@@ -57,10 +55,10 @@ import "./history.js";
 
   function wireAuthButtons() {
     const loginBtn = $("loginGoogle");
-    const logoutBtn = $("logoutBtn"); // puede no existir y está OK
+    const logoutBtn = $("logoutBtn");
 
     if (loginBtn) {
-      // evitar múltiples listeners
+      // evita listeners duplicados
       const clean = loginBtn.cloneNode(true);
       loginBtn.parentNode.replaceChild(clean, loginBtn);
 
@@ -79,14 +77,48 @@ import "./history.js";
     }
 
     if (logoutBtn) {
-      logoutBtn.addEventListener("click", async () => {
+      const clean2 = logoutBtn.cloneNode(true);
+      logoutBtn.parentNode.replaceChild(clean2, logoutBtn);
+
+      clean2.disabled = false;
+      clean2.addEventListener("click", async () => {
         try {
+          setText("authStatusText", "Cerrando sesión…");
+          setText("authStatus", "");
           await signOut();
           location.reload();
         } catch (e) {
           console.error("❌ signOut", e);
         }
       });
+    }
+  }
+
+  // ✅ Extra: forzar intercambio del code por sesión lo antes posible
+  async function exchangeCodeIfPresent() {
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get("code");
+
+    if (!code) return false;
+
+    try {
+      setText("authStatusText", "Finalizando login…");
+      setText("authStatus", "Procesando…");
+
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
+      if (error) throw error;
+
+      // limpiar URL
+      url.searchParams.delete("code");
+      url.searchParams.delete("state");
+      window.history.replaceState({}, document.title, url.toString());
+
+      return true;
+    } catch (e) {
+      console.error("❌ exchangeCodeForSession", e);
+      setText("authStatusText", "Error finalizando login.");
+      setText("authStatus", `❌ ${e?.message || e}`);
+      return false;
     }
   }
 
@@ -103,8 +135,8 @@ import "./history.js";
       const user = await getSessionUser();
 
       if (!user) {
-        lastUserId = null;
         Store.ready = false;
+        lastUserId = null;
         if (loginBtn) loginBtn.disabled = false;
         if (logoutBtn) logoutBtn.disabled = true;
         setText("authStatusText", "Inicia sesión para usar la app.");
@@ -112,7 +144,6 @@ import "./history.js";
         return;
       }
 
-      // si es el mismo user y ya está listo, no recargues todo al volver de pestaña
       if (Store.ready && lastUserId === user.id) {
         if (loginBtn) loginBtn.disabled = true;
         if (logoutBtn) logoutBtn.disabled = false;
@@ -132,11 +163,13 @@ import "./history.js";
 
       setText("authStatusText", `✅ Conectado: ${user.email || user.id}`);
       setText("authStatus", "Conectado ✅");
+
+      window.dispatchEvent(new Event("op:storeReady"));
     } catch (e) {
       console.error("❌ refreshSessionUI", e);
       Store.ready = false;
-      if ($("loginGoogle")) $("loginGoogle").disabled = false;
-      if ($("logoutBtn")) $("logoutBtn").disabled = true;
+      if (loginBtn) loginBtn.disabled = false;
+      if (logoutBtn) logoutBtn.disabled = true;
       setText("authStatusText", "Error verificando sesión.");
       setText("authStatus", `❌ ${e?.message || e}`);
     }
@@ -150,6 +183,7 @@ import "./history.js";
   }
 
   let started = false;
+
   async function start() {
     if (started) return;
     started = true;
@@ -158,12 +192,21 @@ import "./history.js";
     wireAuthButtons();
     wireTabChecks();
 
+    // 1) Consumir ?code=... si existe
+    await exchangeCodeIfPresent();
+
+    // 2) Luego refrescar sesión normal
+    await refreshSessionUI("init");
+
+    // 3) Cambios de auth reales
     supabase.auth.onAuthStateChange(() => refreshSessionUI("auth"));
 
-    await refreshSessionUI("init");
     console.log("✅ app.js listo");
   }
 
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
-  else start();
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start);
+  } else {
+    start();
+  }
 })();
