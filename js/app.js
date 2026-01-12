@@ -1,4 +1,4 @@
-// app.js — Open Padel bootstrap (FIX: importar módulos ANTES de disparar op:storeReady)
+// app.js — Open Padel bootstrap (login a prueba de fallos con window.OP_LOGIN/OP_LOGOUT)
 
 import { supabase } from "./supabaseClient.js";
 import { Store } from "./store.js";
@@ -20,7 +20,6 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     if (state === "ok") dot.classList.add("ok");
     if (state === "bad") dot.classList.add("bad");
   }
-
   function setSpinner(on) {
     const sp = $("authSpinner");
     if (!sp) return;
@@ -54,6 +53,56 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     }
   }
 
+  // ✅ DEFINITIVO: funciones globales para onclick (aunque fallen imports de módulos)
+  window.OP_LOGIN = async () => {
+    try {
+      setSpinner(true);
+      setDot(null);
+      setText("authStatusText", "Abriendo Google…");
+      setText("authStatus", "Espera…");
+      await signInWithGoogle();
+    } catch (e) {
+      console.error("❌ OP_LOGIN", e);
+      setSpinner(false);
+      setDot("bad");
+      setText("authStatusText", "Error al iniciar sesión.");
+      setText("authStatus", e?.message || String(e));
+    }
+  };
+
+  window.OP_LOGOUT = async () => {
+    try {
+      const logoutBtn = $("logoutBtn");
+      if (logoutBtn) logoutBtn.disabled = true;
+
+      setSpinner(true);
+      setDot(null);
+      setText("authStatusText", "Cerrando sesión…");
+      setText("authStatus", "");
+
+      await signOut();
+
+      Store.ready = false;
+      Store.setPlayers?.([]);
+
+      setSpinner(false);
+      setDot("bad");
+      setUserUI(null);
+      setText("authStatusText", "Sesión cerrada.");
+      setText("authStatus", "No conectado");
+
+      setTimeout(() => location.reload(), 50);
+    } catch (e) {
+      console.error("❌ OP_LOGOUT", e);
+      setSpinner(false);
+      setDot("bad");
+      setText("authStatusText", "Error cerrando sesión.");
+      setText("authStatus", e?.message || String(e));
+      const logoutBtn = $("logoutBtn");
+      if (logoutBtn) logoutBtn.disabled = false;
+    }
+  };
+
   // ---- Nav ----
   function setActiveNav(activeId) {
     ["navBase", "navTeams", "navTurns", "navHistory"].forEach((id) => {
@@ -61,18 +110,6 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
       if (!btn) return;
       btn.classList.toggle("active", id === activeId);
     });
-  }
-
-  function currentViewKey() {
-    const vb = $("viewBase");
-    const vt = $("viewTeams");
-    const vtu = $("viewTurns");
-    const vh = $("viewHistory");
-    if (vb && vb.style.display !== "none") return "base";
-    if (vt && vt.style.display !== "none") return "teams";
-    if (vtu && vtu.style.display !== "none") return "turns";
-    if (vh && vh.style.display !== "none") return "history";
-    return "base";
   }
 
   function showView(view) {
@@ -99,14 +136,13 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     showView("base");
   }
 
-  // ✅ PKCE exchange (solo aquí)
+  // ✅ PKCE exchange solo si hay ?code=
   async function exchangeCodeIfPresent() {
     const url = new URL(window.location.href);
     const code = url.searchParams.get("code");
     if (!code) return;
 
     setSpinner(true);
-    setDot(null);
     setText("authStatusText", "Finalizando login…");
     setText("authStatus", "Procesando…");
 
@@ -118,159 +154,67 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     window.history.replaceState({}, document.title, url.toString());
   }
 
-  // ---- timeout helper ----
-  function withTimeout(promise, ms, label = "timeout") {
-    let t;
-    const timeout = new Promise((_, rej) => {
-      t = setTimeout(() => rej(new Error(`${label}: ${ms}ms`)), ms);
-    });
-    return Promise.race([
-      promise.finally(() => clearTimeout(t)),
-      timeout
-    ]);
-  }
-
   let lastUserId = null;
-  let refreshInFlight = null;
 
   async function refreshSessionUI(source = "") {
-    if (refreshInFlight) return refreshInFlight;
-
-    const run = (async () => {
-      const loginBtn = $("loginGoogle");
-      const logoutBtn = $("logoutBtn");
-
-      try {
-        setSpinner(true);
-        setDot(null);
-        setText("authStatusText", source ? `Verificando sesión… (${source})` : "Verificando sesión…");
-        setText("authStatus", "Conectando…");
-
-        const user = await withTimeout(getSessionUser(), 8000, "getSessionUser");
-
-        if (!user) {
-          Store.ready = false;
-          lastUserId = null;
-
-          setUserUI(null);
-          if (loginBtn) loginBtn.disabled = false;
-          if (logoutBtn) logoutBtn.disabled = true;
-
-          setSpinner(false);
-          setDot("bad");
-          setText("authStatusText", "Inicia sesión para usar la app.");
-          setText("authStatus", "No conectado");
-          return;
-        }
-
-        // logged-in
-        setUserUI(user);
-        if (loginBtn) loginBtn.disabled = true;
-        if (logoutBtn) logoutBtn.disabled = false;
-
-        setDot("ok");
-        setText("authStatusText", `✅ Conectado: ${user.email || user.id}`);
-        setText("authStatus", "Conectado ✅");
-
-        // cargar players si primera vez o cambió usuario
-        if (!Store.ready || lastUserId !== user.id) {
-          lastUserId = user.id;
-          const players = await withTimeout(listPlayers(), 12000, "listPlayers");
-          Store.setPlayers(players);
-          Store.setReady();
-          window.dispatchEvent(new Event("op:storeReady"));
-        }
-
-        setSpinner(false);
-      } catch (e) {
-        console.error("❌ refreshSessionUI", e);
-
-        setSpinner(false);
-        setDot("bad");
-        if ($("loginGoogle")) $("loginGoogle").disabled = false;
-        if ($("logoutBtn")) $("logoutBtn").disabled = true;
-
-        setText("authStatusText", "❌ Error verificando sesión.");
-        setText("authStatus", e?.message || String(e));
-
-        Store.ready = false;
-        lastUserId = null;
-        setUserUI(null);
-      }
-    })();
-
-    refreshInFlight = run.finally(() => { refreshInFlight = null; });
-    return refreshInFlight;
-  }
-
-  function wireAuthButtons() {
     const loginBtn = $("loginGoogle");
     const logoutBtn = $("logoutBtn");
 
-    if (loginBtn) {
-      loginBtn.onclick = async () => {
-        try {
-          setSpinner(true);
-          setDot(null);
-          setText("authStatusText", "Abriendo Google…");
-          setText("authStatus", "Espera…");
-          await signInWithGoogle();
-        } catch (e) {
-          console.error(e);
-          setSpinner(false);
-          setDot("bad");
-          setText("authStatusText", "Error al iniciar sesión.");
-          setText("authStatus", `❌ ${e?.message || e}`);
-        }
-      };
-    }
-
-    if (logoutBtn) {
-      logoutBtn.onclick = async () => {
-        try {
-          logoutBtn.disabled = true;
-          setSpinner(true);
-          setDot(null);
-          setText("authStatusText", "Cerrando sesión…");
-          setText("authStatus", "");
-
-          await signOut();
-
-          Store.ready = false;
-          Store.setPlayers?.([]);
-          lastUserId = null;
-
-          await refreshSessionUI("signed out");
-          setTimeout(() => location.reload(), 50);
-        } catch (e) {
-          console.error("❌ logout", e);
-          setSpinner(false);
-          setDot("bad");
-          setText("authStatusText", "Error cerrando sesión.");
-          setText("authStatus", `❌ ${e?.message || e}`);
-          logoutBtn.disabled = false;
-        }
-      };
-    }
-  }
-
-  function wireTabChecks() {
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") refreshSessionUI("tab visible").catch(console.error);
-    });
-    window.addEventListener("focus", () => refreshSessionUI("focus").catch(console.error));
-  }
-
-  async function safeImport(path, tag) {
     try {
-      await import(path);
-      console.log(`✅ módulo cargado: ${tag}`);
-      return true;
+      setSpinner(true);
+      setDot(null);
+      setText("authStatusText", source ? `Verificando sesión… (${source})` : "Verificando sesión…");
+      setText("authStatus", "…");
+
+      const user = await getSessionUser();
+
+      if (!user) {
+        Store.ready = false;
+        lastUserId = null;
+
+        setUserUI(null);
+        if (loginBtn) loginBtn.disabled = false;
+        if (logoutBtn) logoutBtn.disabled = true;
+
+        setSpinner(false);
+        setDot("bad");
+        setText("authStatusText", "Inicia sesión para usar la app.");
+        setText("authStatus", "No conectado");
+        return;
+      }
+
+      setUserUI(user);
+      if (loginBtn) loginBtn.disabled = true;
+      if (logoutBtn) logoutBtn.disabled = false;
+
+      setSpinner(false);
+      setDot("ok");
+      setText("authStatusText", `✅ Conectado: ${user.email || user.id}`);
+      setText("authStatus", "Conectado ✅");
+
+      if (!Store.ready || lastUserId !== user.id) {
+        lastUserId = user.id;
+        const players = await listPlayers();
+        Store.setPlayers(players);
+        Store.setReady();
+        window.dispatchEvent(new Event("op:storeReady"));
+      }
     } catch (e) {
-      console.error(`❌ fallo import ${tag} (${path})`, e);
-      // no romper auth
-      return false;
+      console.error("❌ refreshSessionUI", e);
+      setSpinner(false);
+      setDot("bad");
+      setText("authStatusText", "❌ Error verificando sesión.");
+      setText("authStatus", e?.message || String(e));
+      Store.ready = false;
+      lastUserId = null;
+      setUserUI(null);
+      if (loginBtn) loginBtn.disabled = false;
+      if (logoutBtn) logoutBtn.disabled = true;
     }
+  }
+
+  async function safeImport(path) {
+    try { await import(path); } catch (e) { console.error("❌ import", path, e); }
   }
 
   let started = false;
@@ -279,8 +223,6 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     started = true;
 
     initNavigation();
-    wireAuthButtons();
-    wireTabChecks();
 
     try {
       await exchangeCodeIfPresent();
@@ -289,29 +231,22 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
       setSpinner(false);
       setDot("bad");
       setText("authStatusText", "Error finalizando login.");
-      setText("authStatus", `❌ ${e?.message || e}`);
+      setText("authStatus", e?.message || String(e));
     }
 
-    // escuchar cambios reales de auth
-    supabase.auth.onAuthStateChange(() => {
-      refreshSessionUI("auth").catch(console.error);
+    // módulos primero
+    await safeImport("./db.js");
+    await safeImport("./teams.js");
+    await safeImport("./turns.js");
+    await safeImport("./history.js");
+
+    // auth event
+    supabase.auth.onAuthStateChange((event) => {
+      refreshSessionUI(`auth:${event}`).catch(console.error);
     });
 
-    // ✅ CLAVE: cargar módulos ANTES del refresh init
-    await safeImport("./db.js", "db");
-    await safeImport("./teams.js", "teams");
-    await safeImport("./turns.js", "turns");
-    await safeImport("./history.js", "history");
-
-    // Ahora sí: init de sesión (dispara op:storeReady cuando corresponde)
     await refreshSessionUI("init");
-
-    // y forzamos render de la vista actual por si el store ya estaba listo
-    const v = currentViewKey();
-    window.OP = window.OP || {};
-    window.OP.refresh?.(v);
-
-    console.log("✅ app.js listo (módulos antes de storeReady)");
+    console.log("✅ app.js listo");
   }
 
   if (document.readyState === "loading") {
