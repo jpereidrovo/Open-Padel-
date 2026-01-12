@@ -8,8 +8,8 @@
   <!-- evita 404 favicon -->
   <link rel="icon" href="data:,">
 
-  <!-- ✅ cache-busting -->
-  <link rel="stylesheet" href="./css/styles.css?v=20260112">
+  <!-- cache-busting -->
+  <link rel="stylesheet" href="./css/styles.css?v=20260112-2">
 
   <style>
     /* UX helpers (no pisa tu CSS: son utilitarios) */
@@ -151,3 +151,130 @@
 
       <section id="viewTurns" style="display:none;">
         <h1>Turnos</h1>
+        <div id="turnsMount"></div>
+      </section>
+
+      <section id="viewHistory" style="display:none;">
+        <h1>Historial</h1>
+        <div id="historyMount"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ✅ jsPDF (PDF en Turnos) -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+  <!-- ✅ LOGIN “a prueba de fallos”: NO depende de app.js -->
+  <script type="module">
+    import { supabase } from "./js/supabaseClient.js?v=20260112-2";
+    import { signInWithGoogle, signOut, getSessionUser } from "./js/supabaseApi.js?v=20260112-2";
+
+    const $ = (id) => document.getElementById(id);
+    const setText = (id, t) => { const el = $(id); if (el) el.textContent = t; };
+
+    function setUserUI(user) {
+      const nameEl = $("userName");
+      const mailEl = $("userEmail");
+      const avatarEl = $("userAvatar");
+
+      if (!user) {
+        if (nameEl) nameEl.textContent = "No has iniciado sesión";
+        if (mailEl) mailEl.textContent = "—";
+        if (avatarEl) avatarEl.innerHTML = "";
+        return;
+      }
+
+      const meta = user.user_metadata || {};
+      const fullName = meta.full_name || meta.name || user.email || user.id;
+      const email = user.email || "—";
+      const pic = meta.avatar_url || meta.picture || "";
+
+      if (nameEl) nameEl.textContent = fullName;
+      if (mailEl) mailEl.textContent = email;
+
+      if (avatarEl) {
+        avatarEl.innerHTML = pic
+          ? `<img src="${pic}" alt="" referrerpolicy="no-referrer" />`
+          : `<span style="font-size:12px; opacity:.8;">OP</span>`;
+      }
+    }
+
+    async function exchangeCodeIfPresent() {
+      const url = new URL(window.location.href);
+      const code = url.searchParams.get("code");
+      if (!code) return;
+
+      setText("authStatusText", "Finalizando login…");
+      setText("authStatus", "Procesando…");
+
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
+      if (error) throw error;
+
+      url.searchParams.delete("code");
+      url.searchParams.delete("state");
+      window.history.replaceState({}, document.title, url.toString());
+    }
+
+    async function refreshUI(source="") {
+      const loginBtn = $("loginGoogle");
+      const logoutBtn = $("logoutBtn");
+
+      setText("authStatusText", source ? `Verificando sesión… (${source})` : "Verificando sesión…");
+      setText("authStatus", "");
+
+      const user = await getSessionUser();
+
+      if (!user) {
+        setUserUI(null);
+        if (loginBtn) loginBtn.disabled = false;
+        if (logoutBtn) logoutBtn.disabled = true;
+        setText("authStatusText", "Inicia sesión para usar la app.");
+        setText("authStatus", "No conectado");
+        return;
+      }
+
+      setUserUI(user);
+      if (loginBtn) loginBtn.disabled = true;
+      if (logoutBtn) logoutBtn.disabled = false;
+      setText("authStatusText", `✅ Conectado: ${user.email || user.id}`);
+      setText("authStatus", "Conectado ✅");
+    }
+
+    // Wire buttons (independiente de app.js)
+    $("loginGoogle")?.addEventListener("click", async () => {
+      try {
+        setText("authStatusText", "Abriendo Google…");
+        setText("authStatus", "Espera…");
+        await signInWithGoogle();
+      } catch (e) {
+        console.error(e);
+        setText("authStatusText", "Error al iniciar sesión.");
+        setText("authStatus", `❌ ${e?.message || e}`);
+      }
+    });
+
+    $("logoutBtn")?.addEventListener("click", async () => {
+      try {
+        setText("authStatusText", "Cerrando sesión…");
+        setText("authStatus", "");
+        await signOut();
+        await refreshUI("signed out");
+        setTimeout(() => location.reload(), 50);
+      } catch (e) {
+        console.error(e);
+        setText("authStatusText", "Error cerrando sesión.");
+        setText("authStatus", `❌ ${e?.message || e}`);
+      }
+    });
+
+    // init
+    try { await exchangeCodeIfPresent(); } catch (e) { console.error(e); }
+    supabase.auth.onAuthStateChange(() => refreshUI("auth").catch(console.error));
+    refreshUI("init").catch(console.error);
+  </script>
+
+  <!-- Tu app principal (puede estar rota, pero ya no rompe el login) -->
+  <script type="module" src="./js/app.js?v=20260112-2"></script>
+</body>
+</html>
