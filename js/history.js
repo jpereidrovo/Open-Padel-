@@ -1,8 +1,8 @@
-// history.js — Historial por fecha (Equipos + Turnos + Resumen)
-// Requiere: supabaseApi.js con listHistoryDates() y getHistoryDetail()
+// history.js — Historial por sesión (fecha - n): Equipos + Turnos + Resumen
+// Requiere: supabaseApi.js con listHistorySessions(), getHistoryDetailByKey(), deleteResultsByKey()
 
 import { Store } from "./store.js";
-import { listHistoryDates, getHistoryDetail } from "./supabaseApi.js";
+import { listHistorySessions, getHistoryDetailByKey, deleteResultsByKey } from "./supabaseApi.js";
 
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -14,7 +14,7 @@ import { listHistoryDates, getHistoryDetail } from "./supabaseApi.js";
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#039;");
 
-  let selectedDate = null;
+  let selectedSessionKey = null;
 
   function niceDate(yyyy_mm_dd) {
     const raw = String(yyyy_mm_dd || "").slice(0, 10);
@@ -23,53 +23,18 @@ import { listHistoryDates, getHistoryDetail } from "./supabaseApi.js";
     return d.toLocaleDateString("es-EC", { year: "numeric", month: "long", day: "2-digit" });
   }
 
+  function sessionLabel(row) {
+    const d = String(row?.session_date || "").slice(0, 10);
+    const n = Number(row?.session_seq || 1);
+    return `${niceDate(d)} - ${n}`;
+  }
+
   function formatScore(raw) {
     if (!raw) return "";
     const digits = String(raw).replace(/\D/g, "").slice(0, 2);
     if (digits.length === 0) return "";
     if (digits.length === 1) return digits;
     return `${digits[0]}-${digits[1]}`;
-  }
-
-  /* -------------------- UX global: badges/pill -------------------- */
-  function getPoolPlayers() {
-    const poolIds = new Set(Store.state?.pool || []);
-    return (Store.players || []).filter((p) => poolIds.has(p.id));
-  }
-
-  function computeCourtsCountFromPool() {
-    const poolIds = Store.state?.pool || [];
-    const poolPlayers = getPoolPlayers();
-    const total = poolIds.length;
-    if (!total) return 0;
-
-    const d = poolPlayers.filter((p) => p.side === "D").length;
-    const r = poolPlayers.filter((p) => p.side === "R").length;
-
-    if (total % 4 === 0 && d === r) return total / 4;
-    return 0;
-  }
-
-  function updateChrome() {
-    const tagBase = $("tagBase");
-    const tagTeams = $("tagTeams");
-    const pillInfo = $("pillInfo");
-
-    const playersCount =
-      Store.getPlayersCount?.() ?? (Array.isArray(Store.players) ? Store.players.length : 0);
-
-    const teamsCount =
-      Store.getTeamsCount?.() ??
-      ((Store.state?.team_a?.length || 0) + (Store.state?.team_b?.length || 0));
-
-    const selected =
-      Store.getPoolCount?.() ?? (Array.isArray(Store.state?.pool) ? Store.state.pool.length : 0);
-
-    const courts = computeCourtsCountFromPool();
-
-    if (tagBase) tagBase.textContent = String(playersCount);
-    if (tagTeams) tagTeams.textContent = String(teamsCount);
-    if (pillInfo) pillInfo.textContent = `N: ${selected} • Canchas: ${courts}`;
   }
 
   function renderTeams(session) {
@@ -82,9 +47,7 @@ import { listHistoryDates, getHistoryDetail } from "./supabaseApi.js";
     return `
       <div class="card" style="margin-top:12px;">
         <h3 style="margin:0 0 10px;">Equipos</h3>
-        <div class="hint muted" style="margin-bottom:10px;">Jugadores: <b>${esc(
-          session?.totalPlayers ?? (A.length + B.length)
-        )}</b></div>
+        <div class="hint muted" style="margin-bottom:10px;">Jugadores: <b>${esc(session?.totalPlayers ?? (A.length + B.length))}</b></div>
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
           <div class="card" style="background: rgba(0,0,0,.12);">
             <h4 style="margin:0 0 10px;">Equipo A (${A.length})</h4>
@@ -104,7 +67,7 @@ import { listHistoryDates, getHistoryDetail } from "./supabaseApi.js";
       return `
         <div class="card" style="margin-top:12px;">
           <h3 style="margin:0 0 10px;">Resultados</h3>
-          <div class="hint muted">Aún no hay resultados guardados para esta fecha.</div>
+          <div class="hint muted">Aún no hay resultados guardados para esta sesión.</div>
         </div>
       `;
     }
@@ -122,12 +85,9 @@ import { listHistoryDates, getHistoryDetail } from "./supabaseApi.js";
           perTurn.length
             ? `
           <div style="margin-top:10px; display:grid; gap:6px;">
-            ${perTurn
-              .map(
-                (pt) =>
-                  `<div class="hint muted">Turno ${esc(pt.turn)}: A ${esc(pt.aPts)} • B ${esc(pt.bPts)}</div>`
-              )
-              .join("")}
+            ${perTurn.map(pt => `
+              <div class="hint muted">Turno ${esc(pt.turn)}: A ${esc(pt.aPts)} • B ${esc(pt.bPts)}</div>
+            `).join("")}
           </div>
         `
             : ``
@@ -203,48 +163,17 @@ import { listHistoryDates, getHistoryDetail } from "./supabaseApi.js";
     const mount = $("historyMount");
     if (!mount) return;
 
-    updateChrome();
-
-    // No sesión / no listo
     if (!Store.ready && Store.status !== "loading") {
-      if (Store.status === "error") {
-        const msg = Store.error?.message || "Ocurrió un error.";
-        mount.innerHTML = `
-          <div class="card" style="margin-top:10px;">
-            <div class="hint" style="font-weight:700;">⚠️ Error</div>
-            <div class="hint muted" style="margin-top:6px;">${esc(msg)}</div>
-          </div>
-        `;
-        return;
-      }
-
-      mount.innerHTML = `
-        <div class="card" style="margin-top:10px;">
-          <div class="hint muted">Inicia sesión para ver Historial.</div>
-        </div>
-      `;
+      mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint muted">Inicia sesión para ver Historial.</div></div>`;
       return;
     }
-
-    // Loading global
     if (Store.status === "loading") {
-      mount.innerHTML = `
-        <div class="card" style="margin-top:10px;">
-          <div class="hint muted">Cargando…</div>
-        </div>
-      `;
+      mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint muted">Cargando…</div></div>`;
       return;
     }
-
-    // Error global
     if (Store.status === "error") {
       const msg = Store.error?.message || "Ocurrió un error.";
-      mount.innerHTML = `
-        <div class="card" style="margin-top:10px;">
-          <div class="hint" style="font-weight:700;">⚠️ Error</div>
-          <div class="hint muted" style="margin-top:6px;">${esc(msg)}</div>
-        </div>
-      `;
+      mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint error">${esc(msg)}</div></div>`;
       return;
     }
 
@@ -252,7 +181,7 @@ import { listHistoryDates, getHistoryDetail } from "./supabaseApi.js";
       <div class="card" style="margin-top:10px;">
         <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">
           <div>
-            <div class="hint muted">Historial por fecha (Equipos + Turnos + Resultados).</div>
+            <div class="hint muted">Historial por sesión (fecha - n): Equipos + Turnos + Resultados.</div>
           </div>
           <div class="btns">
             <button class="ghost" id="btnHistoryReload" type="button">Recargar</button>
@@ -261,71 +190,64 @@ import { listHistoryDates, getHistoryDetail } from "./supabaseApi.js";
       </div>
 
       <div class="card" style="margin-top:12px;">
-        <h3 style="margin:0 0 10px;">Fechas</h3>
-        <div id="historyDates" style="display:flex; gap:10px; flex-wrap:wrap;"></div>
+        <h3 style="margin:0 0 10px;">Sesiones</h3>
+        <div id="historySessions" style="display:flex; gap:10px; flex-wrap:wrap;"></div>
       </div>
 
       <div id="historyDetail"></div>
     `;
 
-    const datesEl = $("historyDates");
+    const listEl = $("historySessions");
     const detailEl = $("historyDetail");
 
-    datesEl.innerHTML = `<div class="hint muted">Cargando fechas…</div>`;
+    listEl.innerHTML = `<div class="hint muted">Cargando sesiones…</div>`;
     detailEl.innerHTML = "";
 
-    let dates = [];
+    let rows = [];
     try {
-      const rows = await listHistoryDates(); // viene de sessions
-      dates = (rows || []).map((r) => String(r.session_date).slice(0, 10));
+      rows = await listHistorySessions();
     } catch (e) {
       console.error(e);
-      datesEl.innerHTML = `<div class="hint error">Error cargando fechas: ${esc(e?.message || e)}</div>`;
+      listEl.innerHTML = `<div class="hint error">Error cargando sesiones: ${esc(e?.message || e)}</div>`;
+      return;
+    }
+
+    if (!rows.length) {
+      listEl.innerHTML = `<div class="hint muted">Aún no hay historial. Guarda equipos para crear una sesión.</div>`;
       detailEl.innerHTML = "";
       return;
     }
 
-    if (!dates.length) {
-      datesEl.innerHTML = `<div class="hint muted">Aún no hay historial. Guarda equipos para crear una fecha.</div>`;
-      detailEl.innerHTML = "";
-      return;
-    }
+    if (!selectedSessionKey) selectedSessionKey = rows[0].session_key;
 
-    if (!selectedDate) selectedDate = dates[0];
-
-    datesEl.innerHTML = dates
-      .map(
-        (d) => `
-      <button class="ghost" type="button" data-date="${esc(d)}" style="${
-          d === selectedDate ? "border-color: rgba(255,255,255,.35);" : ""
-        }">
-        ${esc(niceDate(d))}
-      </button>
-    `
-      )
+    listEl.innerHTML = rows
+      .map((r) => {
+        const active = r.session_key === selectedSessionKey;
+        return `
+          <button class="ghost" type="button" data-key="${esc(r.session_key)}"
+            style="${active ? "border-color: rgba(255,255,255,.35);" : ""}">
+            ${esc(sessionLabel(r))}
+          </button>
+        `;
+      })
       .join("");
 
-    datesEl.querySelectorAll("[data-date]").forEach((btn) => {
+    listEl.querySelectorAll("[data-key]").forEach((btn) => {
       btn.addEventListener("click", async () => {
-        selectedDate = btn.getAttribute("data-date");
+        selectedSessionKey = btn.getAttribute("data-key");
         await render();
       });
     });
 
-    detailEl.innerHTML = `
-      <div class="card" style="margin-top:12px;">
-        <div class="hint muted">Cargando detalle…</div>
-      </div>
-    `;
+    detailEl.innerHTML = `<div class="card" style="margin-top:12px;"><div class="hint muted">Cargando detalle…</div></div>`;
 
     try {
-      const { session, results } = await getHistoryDetail(selectedDate);
+      const { session, results } = await getHistoryDetailByKey(selectedSessionKey);
 
       if (!session) {
         detailEl.innerHTML = `
           <div class="card" style="margin-top:12px;">
-            <h2 style="margin:0;">${esc(niceDate(selectedDate))}</h2>
-            <div class="hint muted" style="margin-top:8px;">No hay equipos guardados en esta fecha.</div>
+            <div class="hint muted">No se encontró la sesión.</div>
           </div>
         `;
         return;
@@ -333,26 +255,53 @@ import { listHistoryDates, getHistoryDetail } from "./supabaseApi.js";
 
       detailEl.innerHTML = `
         <div class="card" style="margin-top:12px;">
-          <h2 style="margin:0;">${esc(niceDate(selectedDate))}</h2>
-          <div class="hint muted" style="margin-top:6px;">Guarda equipos y luego guarda turnos/resultados para completar el historial.</div>
+          <h2 style="margin:0;">${esc(sessionLabel(session))}</h2>
+          <div class="hint muted" style="margin-top:6px;">session_key: <b>${esc(selectedSessionKey)}</b></div>
+
+          <div class="btns" style="margin-top:10px;">
+            <button class="ghost" id="btnDeleteResults" type="button">Borrar resultados (solo esta sesión)</button>
+          </div>
+
+          <div id="historyStatus" class="hint muted" style="margin-top:10px;"></div>
         </div>
 
         ${renderTeams(session)}
         ${renderResults(results)}
         ${results ? renderTurns(results) : ""}
       `;
+
+      const statusEl = $("historyStatus");
+      const setStatus = (m, cls = "muted") => {
+        if (!statusEl) return;
+        statusEl.textContent = m || "";
+        statusEl.className = "hint " + cls;
+      };
+
+      $("btnDeleteResults")?.addEventListener("click", async () => {
+        const ok = confirm("Esto borrará SOLO los resultados/turnos de esta sesión. Los equipos quedan intactos. ¿Seguro?");
+        if (!ok) return;
+
+        try {
+          setStatus("Borrando resultados…", "muted");
+          await deleteResultsByKey(selectedSessionKey);
+          setStatus("✅ Resultados borrados. (Equipos intactos)", "ok");
+          await render();
+        } catch (e) {
+          console.error(e);
+          setStatus(`❌ Error borrando resultados: ${esc(e?.message || e)}`, "error");
+        }
+      });
     } catch (e) {
       console.error(e);
       detailEl.innerHTML = `
         <div class="card" style="margin-top:12px;">
           <div class="hint error">Error cargando detalle: ${esc(e?.message || e)}</div>
-          <div class="hint muted" style="margin-top:8px;">Tip: suele ser policy/RLS o que no exista el UNIQUE para upsert.</div>
         </div>
       `;
     }
 
     $("btnHistoryReload")?.addEventListener("click", async () => {
-      selectedDate = null;
+      selectedSessionKey = null;
       await render();
     });
   }
@@ -366,16 +315,5 @@ import { listHistoryDates, getHistoryDetail } from "./supabaseApi.js";
   };
 
   window.addEventListener("op:storeReady", render);
-
-  // Nuevo: refresco global solo si historial visible
-  window.addEventListener("op:storeChanged", () => {
-    updateChrome();
-    const view = document.getElementById("viewHistory");
-    if (view && view.style.display !== "none") render();
-  });
-
-  document.addEventListener("DOMContentLoaded", () => {
-    updateChrome();
-    render();
-  });
+  document.addEventListener("DOMContentLoaded", render);
 })();
