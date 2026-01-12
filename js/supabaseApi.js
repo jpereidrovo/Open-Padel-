@@ -113,11 +113,9 @@ export async function deleteAllPlayers() {
 }
 
 // ---------------- SESSIONS (Equipos) ----------------
-
 async function getNextSessionSeq(dateISO) {
   const date = cleanDate(dateISO);
 
-  // trae el max seq del día
   const { data, error } = await supabase
     .from("sessions")
     .select("session_seq")
@@ -132,10 +130,9 @@ async function getNextSessionSeq(dateISO) {
 }
 
 /**
- * Guarda equipos como una NUEVA sesión del día (default).
+ * Guarda equipos como NUEVA sesión del día (por defecto).
  * Devuelve: { session_key, session_seq }
- *
- * Si quieres sobrescribir una sesión existente, pasa options.session_seq
+ * Para actualizar una existente: options.session_seq
  */
 export async function saveTeamsToHistory(session_date, totalPlayers, teamA, teamB, options = {}) {
   await requireSession();
@@ -155,22 +152,18 @@ export async function saveTeamsToHistory(session_date, totalPlayers, teamA, team
     updated_at: new Date().toISOString(),
   };
 
-  // ahora el conflicto es (group_code, session_date, session_seq)
   const { error } = await supabase
     .from("sessions")
     .upsert(payload, { onConflict: "group_code,session_date,session_seq" });
 
   if (error) throw error;
-
   return { session_key, session_seq: seq };
 }
 
 // ---------------- RESULTS (Turnos + Summary) ----------------
 /**
  * Guarda resultados en la sesión específica.
- * Puedes pasar:
- *  - session_key (recomendado)
- *  - o { session_date, session_seq }
+ * Debes pasar options.session_key o options.session_seq
  */
 export async function saveResultsToHistory(session_date, turns, scores, summary, options = {}) {
   await requireSession();
@@ -185,13 +178,15 @@ export async function saveResultsToHistory(session_date, turns, scores, summary,
     session_key = makeSessionKey(date, seq);
   } else {
     const parts = String(session_key).split("-");
-    seq = Number(parts[parts.length - 1]) || seq || 1;
+    const last = parts[parts.length - 1];
+    const parsed = Number(last);
+    if (!Number.isNaN(parsed)) seq = parsed;
   }
 
   const payload = {
     group_code: GROUP_CODE,
     session_date: date,
-    session_seq: seq,
+    session_seq: seq || 1,
     session_key,
     turns: turns || [],
     scores: scores || {},
@@ -207,10 +202,9 @@ export async function saveResultsToHistory(session_date, turns, scores, summary,
 }
 
 // ---------------- HISTORY ----------------
-
 /**
- * Lista sesiones (no solo fechas).
- * Devuelve: [{ session_date, session_seq, session_key }]
+ * Lista sesiones (no solo fechas)
+ * [{ session_date, session_seq, session_key }]
  */
 export async function listHistorySessions() {
   await requireSession();
@@ -224,6 +218,26 @@ export async function listHistorySessions() {
 
   if (error) throw error;
   return data || [];
+}
+
+/**
+ * Devuelve la sesión más reciente de una fecha (seq mayor)
+ */
+export async function getLatestSessionKeyByDate(session_date) {
+  await requireSession();
+
+  const date = cleanDate(session_date);
+
+  const { data, error } = await supabase
+    .from("sessions")
+    .select("session_key, session_seq")
+    .eq("group_code", GROUP_CODE)
+    .eq("session_date", date)
+    .order("session_seq", { ascending: false })
+    .limit(1);
+
+  if (error) throw error;
+  return data?.[0] || null; // { session_key, session_seq }
 }
 
 export async function getHistoryDetailByKey(session_key) {
@@ -256,29 +270,33 @@ export async function getHistoryDetailByKey(session_key) {
 }
 
 /**
- * Compat: si todavía llamas por fecha, toma la sesión más reciente de esa fecha (seq mayor).
+ * Compat vieja: si alguien pide por fecha,
+ * trae la sesión más reciente de esa fecha.
  */
 export async function getHistoryDetail(session_date) {
-  await requireSession();
-
-  const date = cleanDate(session_date);
-
-  const { data: sessions, error: e1 } = await supabase
-    .from("sessions")
-    .select("session_key")
-    .eq("group_code", GROUP_CODE)
-    .eq("session_date", date)
-    .order("session_seq", { ascending: false })
-    .limit(1);
-
-  if (e1) throw e1;
-  const key = sessions?.[0]?.session_key;
-  if (!key) return { session: null, results: null };
-  return getHistoryDetailByKey(key);
+  const latest = await getLatestSessionKeyByDate(session_date);
+  if (!latest?.session_key) return { session: null, results: null };
+  return getHistoryDetailByKey(latest.session_key);
 }
 
 /**
- * Borra SOLO resultados de una sesión (para pruebas).
+ * Compat vieja: lista fechas (ya no se usa en history.js nuevo, pero la dejo)
+ */
+export async function listHistoryDates() {
+  await requireSession();
+
+  const { data, error } = await supabase
+    .from("sessions")
+    .select("session_date")
+    .eq("group_code", GROUP_CODE)
+    .order("session_date", { ascending: false });
+
+  if (error) throw error;
+  return data || [];
+}
+
+/**
+ * Borra SOLO resultados de una sesión (para pruebas)
  */
 export async function deleteResultsByKey(session_key) {
   await requireSession();
@@ -296,7 +314,7 @@ export async function deleteResultsByKey(session_key) {
 }
 
 /**
- * Borra TODO de una sesión (equipos + resultados).
+ * Borra TODO de una sesión (equipos + resultados)
  */
 export async function deleteSessionByKey(session_key) {
   await requireSession();
@@ -320,7 +338,7 @@ export async function deleteSessionByKey(session_key) {
 }
 
 /**
- * Compat vieja: borrar por fecha (borra todas las sesiones de esa fecha).
+ * Compat vieja: borra todas las sesiones de una fecha
  */
 export async function deleteHistoryDate(session_date) {
   await requireSession();
