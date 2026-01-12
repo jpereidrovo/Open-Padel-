@@ -1,6 +1,6 @@
 // supabaseApi.js — API única para Open Padel (Supabase)
-// Compatible con módulos viejos (por fecha) + compatible con multi-sesión.
-// IMPORTANTE: NO hace exchangeCodeForSession aquí; eso lo hace app.js.
+// FIX: getSessionUser() ahora es "offline-safe": SOLO usa getSession() (sin getUser()).
+// Eso evita cuelgues al volver de pestaña (focus/visibility).
 
 import { supabase } from "./supabaseClient.js";
 
@@ -16,13 +16,10 @@ function makeSessionKey(dateISO, seq) {
 
 // ---------------- AUTH ----------------
 export async function getSessionUser() {
-  const { data: s1, error: e1 } = await supabase.auth.getSession();
-  if (e1) throw e1;
-  if (s1?.session?.user) return s1.session.user;
-
-  const { data: u, error: e2 } = await supabase.auth.getUser();
-  if (e2) return null;
-  return u?.user || null;
+  // ✅ SOLO lectura local (sin red). Esto evita el cuelgue en focus/tab.
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  return data?.session?.user || null;
 }
 
 export async function requireSession() {
@@ -103,12 +100,7 @@ export async function deleteAllPlayers() {
 }
 
 // ---------------- SESSIONS (Equipos) ----------------
-// Modo "clásico": por fecha única (si tu tabla tiene UNIQUE(group_code, session_date) funciona)
-// Modo multi-sesión: si tu tabla tiene columnas session_seq + UNIQUE(group_code, session_date, session_seq)
-// Este save intenta multi-sesión si existen columnas; si no, igual funciona por fecha.
-
 async function sessionsHasColumn(columnName) {
-  // Heurística sin introspección: hacemos select limitado del campo; si falla, asumimos que no existe.
   try {
     const { error } = await supabase
       .from("sessions")
@@ -139,11 +131,6 @@ async function getNextSessionSeq(dateISO) {
   return maxSeq + 1;
 }
 
-/**
- * Guarda equipos.
- * - Si existe session_seq -> crea NUEVA sesión (por defecto) y upsert por (group_code, session_date, session_seq)
- * - Si NO existe session_seq -> upsert por (group_code, session_date)
- */
 export async function saveTeamsToHistory(session_date, totalPlayers, teamA, teamB, options = {}) {
   await requireSession();
 
@@ -204,13 +191,6 @@ async function resultsHasColumn(columnName) {
   }
 }
 
-/**
- * Guarda resultados.
- * - Si tu tabla results tiene session_seq/session_key -> guarda por sesión
- * - Si no -> guarda por fecha (clásico)
- *
- * Firma compatible con tu turns.js actual: saveResultsToHistory(dateISO, turns, scores, summary)
- */
 export async function saveResultsToHistory(session_date, turns, scores, summary, options = {}) {
   await requireSession();
 
@@ -235,7 +215,6 @@ export async function saveResultsToHistory(session_date, turns, scores, summary,
     return;
   }
 
-  // si hay columnas multi-sesión, intentamos amarrar a la sesión (si se pasa)
   let seq = options.session_seq ? Number(options.session_seq) : null;
   let session_key = options.session_key || null;
 
@@ -247,7 +226,6 @@ export async function saveResultsToHistory(session_date, turns, scores, summary,
     if (!Number.isNaN(parsed)) seq = parsed;
   }
 
-  // Si no especifican sesión, guardamos como "1" para mantener compatibilidad
   if (!seq) seq = 1;
   if (!session_key) session_key = makeSessionKey(date, seq);
 
@@ -283,11 +261,6 @@ export async function listHistoryDates() {
   return data || [];
 }
 
-/**
- * getHistoryDetail(date) — compatible con tu turns.js y history.js viejos:
- * devuelve { session, results } del día.
- * Si hay multi-sesión, devuelve la última sesión del día (seq más alto).
- */
 export async function getHistoryDetail(session_date) {
   await requireSession();
 
@@ -350,10 +323,6 @@ export async function getHistoryDetail(session_date) {
   return { session, results };
 }
 
-/**
- * Borra TODA la fecha: results + sessions
- * (si hay multi-sesión, borra todas las sesiones/seq del día)
- */
 export async function deleteHistoryDate(session_date) {
   await requireSession();
 
@@ -374,7 +343,7 @@ export async function deleteHistoryDate(session_date) {
   if (e2) throw e2;
 }
 
-// ---------------- HISTORY (multi-sesión opcional, para después) ----------------
+// ---------------- HISTORY (multi-sesión opcional) ----------------
 export async function listHistorySessions() {
   await requireSession();
 
