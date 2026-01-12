@@ -1,17 +1,16 @@
-// turns.js — Generar turnos + ingresar marcadores + guardar a historial (results) con multi-sesión
+// turns.js — Generar turnos + ingresar marcadores (fluido) + PDF + guardar a historial (results)
 
 import { Store } from "./store.js";
-import { getHistoryDetailByKey, getLatestSessionKeyByDate, saveResultsToHistory } from "./supabaseApi.js";
+import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
 (function () {
   const $ = (id) => document.getElementById(id);
-  const esc = (s) =>
-    String(s ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
+  const esc = (s) => String(s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 
   function todayISO() {
     const d = new Date();
@@ -49,8 +48,8 @@ import { getHistoryDetailByKey, getLatestSessionKeyByDate, saveResultsToHistory 
   }
 
   function buildPairs(teamPlayers) {
-    const D = teamPlayers.filter((p) => p.side === "D").sort((a, b) => Number(b.rating) - Number(a.rating));
-    const R = teamPlayers.filter((p) => p.side === "R").sort((a, b) => Number(b.rating) - Number(a.rating));
+    const D = teamPlayers.filter(p => p.side === "D").sort((a,b)=>Number(b.rating)-Number(a.rating));
+    const R = teamPlayers.filter(p => p.side === "R").sort((a,b)=>Number(b.rating)-Number(a.rating));
     const pairs = [];
     const n = Math.min(D.length, R.length);
     for (let i = 0; i < n; i++) pairs.push([D[i], R[i]]);
@@ -80,10 +79,10 @@ import { getHistoryDetailByKey, getLatestSessionKeyByDate, saveResultsToHistory 
       let best = null;
 
       for (let attempt = 0; attempt < 40; attempt++) {
-        const AD = shuffle(teamA.filter((p) => p.side === "D"));
-        const AR = shuffle(teamA.filter((p) => p.side === "R"));
-        const BD = shuffle(teamB.filter((p) => p.side === "D"));
-        const BR = shuffle(teamB.filter((p) => p.side === "R"));
+        const AD = shuffle(teamA.filter(p => p.side === "D"));
+        const AR = shuffle(teamA.filter(p => p.side === "R"));
+        const BD = shuffle(teamB.filter(p => p.side === "D"));
+        const BR = shuffle(teamB.filter(p => p.side === "R"));
 
         const nA = Math.min(AD.length, AR.length);
         const nB = Math.min(BD.length, BR.length);
@@ -113,7 +112,7 @@ import { getHistoryDetailByKey, getLatestSessionKeyByDate, saveResultsToHistory 
           court: i + 1,
           top: { team: "A", pair: best.Ause[i] },
           bottom: { team: "B", pair: best.Buse[i] },
-          scoreRaw: "",
+          scoreRaw: ""
         });
       }
 
@@ -154,53 +153,249 @@ import { getHistoryDetailByKey, getLatestSessionKeyByDate, saveResultsToHistory 
     return { totalA, totalB, perTurn };
   }
 
-  async function ensureSessionLoaded(dateISO) {
-    // 1) si ya hay una sesión seleccionada en Store, úsala
-    if (Store.state?.session_key) return { session_key: Store.state.session_key, session_seq: Store.state.session_seq };
-
-    // 2) si no, intenta tomar la más reciente de esa fecha
-    const latest = await getLatestSessionKeyByDate(dateISO);
-    if (!latest?.session_key) {
-      throw new Error("No hay equipos guardados en esta fecha. Ve a Equipos y guarda primero.");
-    }
-
-    Store.setState({
-      session_key: latest.session_key,
-      session_seq: latest.session_seq,
-      session_date: dateISO,
-    });
-
-    return latest;
-  }
-
-  async function ensureTeamsLoadedForSession(session_key) {
-    // Primero busca en Store
+  async function ensureTeamsLoaded(dateISO) {
     const A = Store.state?.team_a || [];
     const B = Store.state?.team_b || [];
     if (A.length && B.length) return { A, B };
 
-    // Si no hay en Store, trae del historial por session_key
-    const detail = await getHistoryDetailByKey(session_key);
+    const detail = await getHistoryDetail(dateISO);
     const session = detail?.session;
-    if (!session) throw new Error("No se encontraron equipos en esa sesión.");
+    if (!session) throw new Error("No hay equipos guardados en esta fecha. Ve a Equipos y guarda primero.");
     return { A: session.team_a || [], B: session.team_b || [] };
   }
 
+  // ---------------- PDF ----------------
+  function getJsPDF() {
+    // jsPDF UMD: window.jspdf.jsPDF
+    try {
+      return window?.jspdf?.jsPDF || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function sessionDisplayLabel() {
+    const date = Store.state?.session_date || todayISO();
+    const seq = Store.state?.session_seq || null;
+    const key = Store.state?.session_key || null;
+
+    // Si existe session_key (multi-sesión), mostramos "YYYY-MM-DD - n"
+    if (key) {
+      const parts = String(key).split("-");
+      const n = parts[parts.length - 1] || (seq || "1");
+      return `${date} - ${n}`;
+    }
+    if (seq) return `${date} - ${seq}`;
+    return `${date}`;
+  }
+
+  function pdfFileName(withResults) {
+    const safe = sessionDisplayLabel().replaceAll(" ", "").replaceAll("/", "-");
+    return `OpenPadel_${safe}_${withResults ? "Resultados" : "Turnos"}.pdf`;
+  }
+
+  function buildPdf(withResults) {
+    const JsPDF = getJsPDF();
+    if (!JsPDF) {
+      alert("No se cargó jsPDF. Revisa que index.html tenga el script de jsPDF.");
+      return;
+    }
+
+    const dateISO = Store.state?.session_date || todayISO();
+    const turns = Array.isArray(Store.state?.turns) ? Store.state.turns : [];
+    const courts = Number(Store.state?.courts || 0);
+
+    if (!turns.length) {
+      alert("No hay turnos para exportar.");
+      return;
+    }
+
+    if (withResults && !allScoresComplete(turns)) {
+      alert("Completa todos los marcadores para exportar el PDF con resultados.");
+      return;
+    }
+
+    const doc = new JsPDF({ unit: "pt", format: "a4" });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+
+    const margin = 42;
+    let y = margin;
+
+    const line = (x1, y1, x2, y2) => doc.line(x1, y1, x2, y2);
+
+    const addHeader = () => {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.text("Open Padel", margin, y);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(11);
+      const subtitle = withResults ? "Resumen de turnos + resultados" : "Resumen de turnos (sin resultados)";
+      doc.text(subtitle, margin, y + 16);
+
+      doc.setFontSize(10);
+      doc.setTextColor(80);
+      doc.text(`Sesión: ${sessionDisplayLabel()}`, margin, y + 34);
+      doc.text(`Fecha: ${dateISO}`, margin + 250, y + 34);
+
+      doc.setTextColor(0);
+      y += 52;
+
+      doc.setDrawColor(180);
+      line(margin, y, pageW - margin, y);
+      y += 16;
+    };
+
+    const ensureSpace = (need = 80) => {
+      if (y + need < pageH - margin) return;
+      doc.addPage();
+      y = margin;
+      addMiniHeader();
+    };
+
+    const addMiniHeader = () => {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text(`Open Padel • Sesión ${sessionDisplayLabel()}`, margin, y);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(90);
+      doc.text(withResults ? "Resultados" : "Turnos", pageW - margin, y, { align: "right" });
+      doc.setTextColor(0);
+      y += 16;
+      doc.setDrawColor(210);
+      line(margin, y, pageW - margin, y);
+      y += 14;
+    };
+
+    addHeader();
+
+    // Resumen arriba (solo si con resultados)
+    if (withResults) {
+      const summary = computeSummary(turns);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text("Resumen global", margin, y);
+      y += 16;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(11);
+      doc.text(`Equipo A: ${summary.totalA} puntos`, margin, y);
+      doc.text(`Equipo B: ${summary.totalB} puntos`, margin + 220, y);
+      y += 14;
+
+      doc.setFontSize(10);
+      doc.setTextColor(80);
+      doc.text(`Canchas: ${courts} • Turnos: ${turns.length}`, margin, y);
+      doc.setTextColor(0);
+      y += 18;
+
+      doc.setDrawColor(220);
+      line(margin, y, pageW - margin, y);
+      y += 16;
+    } else {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(80);
+      doc.text(`Canchas: ${courts} • Turnos: ${turns.length}`, margin, y);
+      doc.setTextColor(0);
+      y += 18;
+
+      doc.setDrawColor(220);
+      line(margin, y, pageW - margin, y);
+      y += 16;
+    }
+
+    // Tablas por turno (formato compacto)
+    for (const t of turns) {
+      ensureSpace(120);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text(`Turno ${t.turnIndex}`, margin, y);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(90);
+      doc.text(`${courts} canchas`, margin + 90, y);
+      doc.setTextColor(0);
+      y += 12;
+
+      // Encabezado tabla
+      const col1 = margin;
+      const col2 = margin + 50;
+      const col3 = margin + 280;
+      const col4 = pageW - margin;
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(80);
+      doc.text("Cancha", col1, y);
+      doc.text("Equipo A (arriba)", col2, y);
+      doc.text("Equipo B (abajo)", col3, y);
+      doc.text(withResults ? "Marcador" : "—", col4, y, { align: "right" });
+      doc.setTextColor(0);
+      y += 10;
+
+      doc.setDrawColor(210);
+      line(margin, y, pageW - margin, y);
+      y += 10;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+
+      for (const m of (t.matches || [])) {
+        ensureSpace(64);
+
+        const top = m?.top?.pair || [];
+        const bot = m?.bottom?.pair || [];
+
+        const topTxt = `${top?.[0]?.name || ""} / ${top?.[1]?.name || ""}`;
+        const botTxt = `${bot?.[0]?.name || ""} / ${bot?.[1]?.name || ""}`;
+
+        const scoreTxt = withResults ? formatScore(m?.scoreRaw || m?.score || "") : "";
+
+        doc.text(`#${String(m.court || "")}`, col1, y);
+
+        // wrap manual simple (dos líneas max)
+        const maxW = col3 - col2 - 10;
+        const topLines = doc.splitTextToSize(topTxt, maxW);
+        const botLines = doc.splitTextToSize(botTxt, maxW);
+
+        doc.text(topLines.slice(0, 2), col2, y);
+        doc.text(botLines.slice(0, 2), col3, y);
+
+        if (withResults) doc.text(scoreTxt || "—", col4, y, { align: "right" });
+
+        y += 16;
+
+        doc.setDrawColor(235);
+        line(margin, y, pageW - margin, y);
+        y += 10;
+      }
+
+      y += 6;
+    }
+
+    // Footer
+    ensureSpace(60);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(110);
+    doc.text(`Generado: ${new Date().toLocaleString("es-EC")}`, margin, pageH - margin);
+    doc.setTextColor(0);
+
+    doc.save(pdfFileName(withResults));
+  }
+
+  // ---------------- UI ----------------
   function render() {
     const mount = $("turnsMount");
     if (!mount) return;
 
-    if (!Store.ready && Store.status !== "loading") {
+    if (!Store.ready) {
       mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint muted">Inicia sesión para usar Turnos.</div></div>`;
-      return;
-    }
-    if (Store.status === "loading") {
-      mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint muted">Cargando…</div></div>`;
-      return;
-    }
-    if (Store.status === "error") {
-      const msg = Store.error?.message || "Ocurrió un error.";
-      mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint error">${esc(msg)}</div></div>`;
       return;
     }
 
@@ -208,27 +403,20 @@ import { getHistoryDetailByKey, getLatestSessionKeyByDate, saveResultsToHistory 
     const turnsState = Array.isArray(Store.state?.turns) ? Store.state.turns : [];
     const courts = Store.state?.courts || 0;
 
-    const session_key = Store.state?.session_key || null;
-    const session_seq = Store.state?.session_seq || null;
-
-    const sessionLabel = session_key
-      ? `Sesión actual: ${esc(date)} - ${esc(session_seq || session_key.split("-").pop())}`
-      : "Sesión actual: — (elige una fecha y genera desde equipos guardados)";
-
     mount.innerHTML = `
       <div class="card" style="margin-top:10px;">
         <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:end; justify-content:space-between;">
           <div>
             <label>Fecha</label>
             <input id="turnsDate" type="date" value="${esc(date)}" />
-            <div class="hint muted" style="margin-top:6px;">${sessionLabel}</div>
+            <div class="hint muted" style="margin-top:6px;">Sesión actual: <b>${esc(sessionDisplayLabel())}</b></div>
           </div>
 
           <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
             <div>
               <label>Turnos</label>
               <select id="turnCount">
-                ${[1,2,3,4].map(n => `<option value="${n}" ${n === (Store.state?.turnCount || 3) ? "selected" : ""}>${n}</option>`).join("")}
+                ${[1,2,3,4].map(n => `<option value="${n}" ${n===3?"selected":""}>${n}</option>`).join("")}
               </select>
             </div>
 
@@ -242,43 +430,67 @@ import { getHistoryDetailByKey, getLatestSessionKeyByDate, saveResultsToHistory 
         <div id="turnsStatus" class="hint muted" style="margin-top:10px;"></div>
       </div>
 
+      <div id="turnsPdfPanel"></div>
       <div id="turnsTable"></div>
       <div id="turnsResults"></div>
     `;
 
     const statusEl = $("turnsStatus");
-    const setStatus = (msg, cls = "muted") => {
+    const setStatus = (msg, cls="muted") => {
       statusEl.textContent = msg || "";
       statusEl.className = "hint " + cls;
     };
 
     $("turnsDate")?.addEventListener("change", (e) => {
-      // al cambiar fecha, resetea la sesión seleccionada (porque cambia el contexto)
-      Store.setState({
-        session_date: e.target.value,
-        session_key: null,
-        session_seq: null,
-        turns: [],
-        courts: 0,
-        summary: null,
-      });
-      render();
+      Store.setState({ session_date: e.target.value });
     });
 
-    $("turnCount")?.addEventListener("change", (e) => {
-      Store.setState({ turnCount: Number(e.target.value || 3) });
-    });
-
+    const pdfPanel = $("turnsPdfPanel");
     const table = $("turnsTable");
     const results = $("turnsResults");
     const btnSave = $("btnSaveTurns");
 
+    function renderPdfPanel() {
+      if (!pdfPanel) return;
+
+      if (!turnsState.length) {
+        pdfPanel.innerHTML = "";
+        return;
+      }
+
+      const canPdfWithResults = allScoresComplete(turnsState);
+
+      pdfPanel.innerHTML = `
+        <div class="card" style="margin-top:12px;">
+          <h3 style="margin:0 0 8px;">PDF</h3>
+          <div class="hint muted">Exporta un resumen sencillo y elegante. El PDF con resultados se habilita cuando completes todos los marcadores.</div>
+
+          <div class="btns" style="margin-top:10px; flex-wrap:wrap;">
+            <button class="ghost" id="btnPdfTurns" type="button">Descargar PDF (turnos)</button>
+            <button class="ghost" id="btnPdfResults" type="button" ${canPdfWithResults ? "" : "disabled"}>
+              Descargar PDF (resultados)
+            </button>
+          </div>
+
+          <div class="hint muted" style="margin-top:10px;">
+            Sesión: <b>${esc(sessionDisplayLabel())}</b> • Turnos: <b>${esc(turnsState.length)}</b> • Canchas: <b>${esc(courts)}</b>
+          </div>
+        </div>
+      `;
+
+      $("btnPdfTurns")?.addEventListener("click", () => buildPdf(false));
+      $("btnPdfResults")?.addEventListener("click", () => buildPdf(true));
+    }
+
     function updateResultsUI() {
+      renderPdfPanel();
+
       if (!turnsState.length) {
         results.innerHTML = "";
         btnSave.disabled = true;
         return;
       }
+
       const summary = computeSummary(turnsState);
       results.innerHTML = `
         <div class="card" style="margin-top:12px;">
@@ -293,10 +505,13 @@ import { getHistoryDetailByKey, getLatestSessionKeyByDate, saveResultsToHistory 
           </div>
         </div>
       `;
+
       btnSave.disabled = !allScoresComplete(turnsState);
     }
 
     function drawTurnsUI() {
+      renderPdfPanel();
+
       if (!turnsState.length) {
         table.innerHTML = `<div class="card" style="margin-top:12px;"><div class="hint muted">Aún no hay turnos generados.</div></div>`;
         results.innerHTML = "";
@@ -325,7 +540,6 @@ import { getHistoryDetailByKey, getLatestSessionKeyByDate, saveResultsToHistory 
                   const sc = parseScore(m.scoreRaw);
                   const win = winnerFromScore(sc);
                   const winnerTxt = win ? (win === "A" ? "Ganador: Equipo A" : "Ganador: Equipo B") : "—";
-                  const key = `${t.turnIndex}:${idx}`;
 
                   return `
                     <tr>
@@ -340,17 +554,17 @@ import { getHistoryDetailByKey, getLatestSessionKeyByDate, saveResultsToHistory 
                         <input
                           inputmode="numeric"
                           maxlength="2"
-                          data-score="${esc(key)}"
+                          data-score="${esc(t.turnIndex)}:${esc(idx)}"
                           value="${esc(scoreDigits(m.scoreRaw))}"
                           style="width:64px;"
                           placeholder="63"
                         />
-                        <span class="hint muted" data-scorefmt="${esc(key)}" style="margin-left:8px;">
+                        <span class="hint muted" data-scorefmt="${esc(t.turnIndex)}:${esc(idx)}" style="margin-left:8px;">
                           ${esc(formatScore(m.scoreRaw))}
                         </span>
                       </td>
                       <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">
-                        <span class="hint ${win ? "ok" : "muted"}" data-winner="${esc(key)}">
+                        <span class="hint ${win ? "ok" : "muted"}" data-winner="${esc(t.turnIndex)}:${esc(idx)}">
                           ${esc(winnerTxt)}
                         </span>
                       </td>
@@ -363,21 +577,23 @@ import { getHistoryDetailByKey, getLatestSessionKeyByDate, saveResultsToHistory 
         </div>
       `).join("");
 
+      // Manejo fluido: NO render() en cada tecla
       table.querySelectorAll("[data-score]").forEach(inp => {
         inp.addEventListener("input", () => {
           const digits = scoreDigits(inp.value);
           inp.value = digits;
 
           const key = inp.getAttribute("data-score");
-          const [tStr, mStr] = String(key || "").split(":");
+          const [tStr, mStr] = key.split(":");
           const tIndex = Number(tStr);
           const mIndex = Number(mStr);
 
           const turn = turnsState.find(x => Number(x.turnIndex) === tIndex);
-          if (!turn || !turn.matches?.[mIndex]) return;
+          if (!turn) return;
 
           turn.matches[mIndex].scoreRaw = digits;
 
+          // Actualizar formato + ganador en la fila (sin re-render)
           const fmtEl = table.querySelector(`[data-scorefmt="${CSS.escape(key)}"]`);
           if (fmtEl) fmtEl.textContent = formatScore(digits);
 
@@ -407,31 +623,18 @@ import { getHistoryDetailByKey, getLatestSessionKeyByDate, saveResultsToHistory 
         setStatus("Generando turnos…", "muted");
 
         const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
-        const numTurns = Number($("turnCount")?.value || Store.state?.turnCount || 3);
+        const numTurns = Number($("turnCount")?.value || 3);
 
-        const sessionInfo = await ensureSessionLoaded(dateISO);
-        const detail = await getHistoryDetailByKey(sessionInfo.session_key);
-
-        const A = detail?.session?.team_a || Store.state?.team_a || [];
-        const B = detail?.session?.team_b || Store.state?.team_b || [];
-
-        if (!A.length || !B.length) throw new Error("No se encontraron equipos en esa sesión.");
-
-        // Mantén Store con equipos para que todo sea consistente
-        Store.setState({ team_a: A, team_b: B });
-
+        const { A, B } = await ensureTeamsLoaded(dateISO);
         const gen = generateTurns(A, B, numTurns);
 
         Store.setState({
           session_date: dateISO,
-          session_key: sessionInfo.session_key,
-          session_seq: sessionInfo.session_seq,
-          turnCount: numTurns,
           courts: gen.courts,
-          turns: gen.turns,
+          turns: gen.turns
         });
 
-        setStatus("✅ Turnos generados. Completa marcadores para guardar.", "ok");
+        setStatus("✅ Turnos generados. Ya puedes exportar PDF de turnos.", "ok");
         render();
       } catch (e) {
         console.error(e);
@@ -446,11 +649,6 @@ import { getHistoryDetailByKey, getLatestSessionKeyByDate, saveResultsToHistory 
         if (!t.length) throw new Error("No hay turnos para guardar.");
         if (!allScoresComplete(t)) throw new Error("Completa todos los marcadores (2 dígitos 0–7, sin empates).");
 
-        const key = Store.state?.session_key;
-        const seq = Store.state?.session_seq;
-
-        if (!key && !seq) throw new Error("No hay sesión seleccionada. Guarda equipos o genera turnos desde una sesión.");
-
         setStatus("Guardando resultados en historial…", "muted");
 
         const summary = computeSummary(t);
@@ -461,19 +659,22 @@ import { getHistoryDetailByKey, getLatestSessionKeyByDate, saveResultsToHistory 
             court: m.court,
             top: { team: "A", pair: m.top.pair },
             bottom: { team: "B", pair: m.bottom.pair },
-            score: scoreDigits(m.scoreRaw),
-          })),
+            score: scoreDigits(m.scoreRaw)
+          }))
         }));
 
         const scoresPayload = { generatedAt: new Date().toISOString() };
-        const summaryPayload = { totalA: summary.totalA, totalB: summary.totalB, perTurn: summary.perTurn };
 
-        await saveResultsToHistory(dateISO, turnsPayload, scoresPayload, summaryPayload, {
-          session_key: key || null,
-          session_seq: seq || null,
-        });
+        const summaryPayload = {
+          totalA: summary.totalA,
+          totalB: summary.totalB,
+          perTurn: summary.perTurn
+        };
 
-        setStatus(`✅ Resultados guardados en ${key || `${dateISO}-${seq}`}. Ve a Historial.`, "ok");
+        // Por ahora: guarda por fecha (si luego quieres amarrarlo a session_key/seq, lo ajustamos)
+        await saveResultsToHistory(dateISO, turnsPayload, scoresPayload, summaryPayload);
+
+        setStatus("✅ Resultados guardados. Ya puedes exportar PDF de resultados.", "ok");
       } catch (e) {
         console.error(e);
         setStatus(`❌ Error al guardar resultados: ${e?.message || e}`, "error");
