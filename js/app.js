@@ -1,4 +1,4 @@
-// app.js — Open Padel bootstrap (PKCE robusto para GitHub Pages)
+// app.js — Open Padel bootstrap (PKCE robusto + logout confiable)
 
 import { supabase } from "./supabaseClient.js";
 import { Store } from "./store.js";
@@ -16,10 +16,7 @@ import "./history.js";
     const el = $(id);
     if (el) el.textContent = text;
   }
-
-  function show(el, yes) {
-    if (el) el.style.display = yes ? "" : "none";
-  }
+  function show(el, yes) { if (el) el.style.display = yes ? "" : "none"; }
 
   function setActiveNav(activeId) {
     ["navBase", "navTeams", "navTurns", "navHistory"].forEach((id) => {
@@ -42,7 +39,7 @@ import "./history.js";
     );
 
     window.OP = window.OP || {};
-    if (typeof window.OP.refresh === "function") window.OP.refresh(view);
+    window.OP.refresh?.(view);
   }
 
   function initNavigation() {
@@ -53,73 +50,21 @@ import "./history.js";
     showView("base");
   }
 
-  function wireAuthButtons() {
-    const loginBtn = $("loginGoogle");
-    const logoutBtn = $("logoutBtn");
-
-    if (loginBtn) {
-      // evita listeners duplicados
-      const clean = loginBtn.cloneNode(true);
-      loginBtn.parentNode.replaceChild(clean, loginBtn);
-
-      clean.disabled = false;
-      clean.addEventListener("click", async () => {
-        try {
-          setText("authStatusText", "Abriendo Google…");
-          setText("authStatus", "Espera…");
-          await signInWithGoogle();
-        } catch (e) {
-          console.error("❌ signInWithGoogle", e);
-          setText("authStatusText", "Error al iniciar sesión.");
-          setText("authStatus", `❌ ${e?.message || e}`);
-        }
-      });
-    }
-
-    if (logoutBtn) {
-      const clean2 = logoutBtn.cloneNode(true);
-      logoutBtn.parentNode.replaceChild(clean2, logoutBtn);
-
-      clean2.disabled = false;
-      clean2.addEventListener("click", async () => {
-        try {
-          setText("authStatusText", "Cerrando sesión…");
-          setText("authStatus", "");
-          await signOut();
-          location.reload();
-        } catch (e) {
-          console.error("❌ signOut", e);
-        }
-      });
-    }
-  }
-
-  // ✅ Extra: forzar intercambio del code por sesión lo antes posible
+  // ✅ Intercambia code PKCE si está en URL
   async function exchangeCodeIfPresent() {
     const url = new URL(window.location.href);
     const code = url.searchParams.get("code");
+    if (!code) return;
 
-    if (!code) return false;
+    setText("authStatusText", "Finalizando login…");
+    setText("authStatus", "Procesando…");
 
-    try {
-      setText("authStatusText", "Finalizando login…");
-      setText("authStatus", "Procesando…");
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) throw error;
 
-      const { error } = await supabase.auth.exchangeCodeForSession(code);
-      if (error) throw error;
-
-      // limpiar URL
-      url.searchParams.delete("code");
-      url.searchParams.delete("state");
-      window.history.replaceState({}, document.title, url.toString());
-
-      return true;
-    } catch (e) {
-      console.error("❌ exchangeCodeForSession", e);
-      setText("authStatusText", "Error finalizando login.");
-      setText("authStatus", `❌ ${e?.message || e}`);
-      return false;
-    }
+    url.searchParams.delete("code");
+    url.searchParams.delete("state");
+    window.history.replaceState({}, document.title, url.toString());
   }
 
   let lastUserId = null;
@@ -128,62 +73,95 @@ import "./history.js";
     const loginBtn = $("loginGoogle");
     const logoutBtn = $("logoutBtn");
 
-    try {
-      setText("authStatusText", source ? `Verificando sesión… (${source})` : "Verificando sesión…");
-      setText("authStatus", "Conectando…");
+    setText("authStatusText", source ? `Verificando sesión… (${source})` : "Verificando sesión…");
+    setText("authStatus", "Conectando…");
 
-      const user = await getSessionUser();
+    const user = await getSessionUser();
 
-      if (!user) {
-        Store.ready = false;
-        lastUserId = null;
-        if (loginBtn) loginBtn.disabled = false;
-        if (logoutBtn) logoutBtn.disabled = true;
-        setText("authStatusText", "Inicia sesión para usar la app.");
-        setText("authStatus", "No conectado");
-        return;
-      }
+    if (!user) {
+      // UI logged-out
+      Store.ready = false;
+      lastUserId = null;
 
-      if (Store.ready && lastUserId === user.id) {
-        if (loginBtn) loginBtn.disabled = true;
-        if (logoutBtn) logoutBtn.disabled = false;
-        setText("authStatusText", `✅ Conectado: ${user.email || user.id}`);
-        setText("authStatus", "Conectado ✅");
-        return;
-      }
+      if (loginBtn) loginBtn.disabled = false;
+      if (logoutBtn) logoutBtn.disabled = true;
 
+      setText("authStatusText", "Inicia sesión para usar la app.");
+      setText("authStatus", "No conectado");
+      return;
+    }
+
+    // UI logged-in
+    if (loginBtn) loginBtn.disabled = true;
+    if (logoutBtn) logoutBtn.disabled = false;
+
+    setText("authStatusText", `✅ Conectado: ${user.email || user.id}`);
+    setText("authStatus", "Conectado ✅");
+
+    if (!Store.ready || lastUserId !== user.id) {
       lastUserId = user.id;
-
       const players = await listPlayers();
       Store.setPlayers(players);
       Store.setReady();
-
-      if (loginBtn) loginBtn.disabled = true;
-      if (logoutBtn) logoutBtn.disabled = false;
-
-      setText("authStatusText", `✅ Conectado: ${user.email || user.id}`);
-      setText("authStatus", "Conectado ✅");
-
       window.dispatchEvent(new Event("op:storeReady"));
-    } catch (e) {
-      console.error("❌ refreshSessionUI", e);
-      Store.ready = false;
-      if (loginBtn) loginBtn.disabled = false;
-      if (logoutBtn) logoutBtn.disabled = true;
-      setText("authStatusText", "Error verificando sesión.");
-      setText("authStatus", `❌ ${e?.message || e}`);
+    }
+  }
+
+  function wireAuthButtons() {
+    const loginBtn = $("loginGoogle");
+    const logoutBtn = $("logoutBtn");
+
+    if (loginBtn) {
+      loginBtn.onclick = async () => {
+        try {
+          setText("authStatusText", "Abriendo Google…");
+          setText("authStatus", "Espera…");
+          await signInWithGoogle();
+        } catch (e) {
+          console.error(e);
+          setText("authStatusText", "Error al iniciar sesión.");
+          setText("authStatus", `❌ ${e?.message || e}`);
+        }
+      };
+    }
+
+    if (logoutBtn) {
+      logoutBtn.onclick = async () => {
+        try {
+          logoutBtn.disabled = true;
+          setText("authStatusText", "Cerrando sesión…");
+          setText("authStatus", "");
+
+          await signOut();
+
+          // limpiar UI/Store local
+          Store.ready = false;
+          Store.setPlayers?.([]);
+          lastUserId = null;
+
+          // refrescar estado real (debe quedar logged out)
+          await refreshSessionUI("signed out");
+
+          // recarga para limpiar vistas/cache (opcional, pero deja todo limpio)
+          setTimeout(() => location.reload(), 50);
+        } catch (e) {
+          console.error("❌ logout", e);
+          setText("authStatusText", "Error cerrando sesión.");
+          setText("authStatus", `❌ ${e?.message || e}`);
+          logoutBtn.disabled = false;
+        }
+      };
     }
   }
 
   function wireTabChecks() {
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") refreshSessionUI("tab visible");
+      if (document.visibilityState === "visible") refreshSessionUI("tab visible").catch(console.error);
     });
-    window.addEventListener("focus", () => refreshSessionUI("focus"));
+    window.addEventListener("focus", () => refreshSessionUI("focus").catch(console.error));
   }
 
   let started = false;
-
   async function start() {
     if (started) return;
     started = true;
@@ -192,15 +170,20 @@ import "./history.js";
     wireAuthButtons();
     wireTabChecks();
 
-    // 1) Consumir ?code=... si existe
-    await exchangeCodeIfPresent();
+    try {
+      await exchangeCodeIfPresent();
+    } catch (e) {
+      console.error("❌ exchange", e);
+      setText("authStatusText", "Error finalizando login.");
+      setText("authStatus", `❌ ${e?.message || e}`);
+    }
 
-    // 2) Luego refrescar sesión normal
+    // escuchar cambios reales de auth
+    supabase.auth.onAuthStateChange(() => {
+      refreshSessionUI("auth").catch(console.error);
+    });
+
     await refreshSessionUI("init");
-
-    // 3) Cambios de auth reales
-    supabase.auth.onAuthStateChange(() => refreshSessionUI("auth"));
-
     console.log("✅ app.js listo");
   }
 
