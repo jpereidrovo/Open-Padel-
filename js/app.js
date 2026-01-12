@@ -1,4 +1,4 @@
-// app.js — Open Padel bootstrap (robusto: auth/navegación primero, módulos safeImport, UI de sesión a prueba de fallos)
+// app.js — Open Padel bootstrap (FIX: importar módulos ANTES de disparar op:storeReady)
 
 import { supabase } from "./supabaseClient.js";
 import { Store } from "./store.js";
@@ -11,13 +11,9 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     const el = $(id);
     if (el) el.textContent = text;
   }
-
-  function show(el, yes) {
-    if (el) el.style.display = yes ? "" : "none";
-  }
+  function show(el, yes) { if (el) el.style.display = yes ? "" : "none"; }
 
   function setDot(state) {
-    // state: "ok" | "bad" | "neutral"
     const dot = $("authDot");
     if (!dot) return;
     dot.classList.remove("ok", "bad");
@@ -67,6 +63,18 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     });
   }
 
+  function currentViewKey() {
+    const vb = $("viewBase");
+    const vt = $("viewTeams");
+    const vtu = $("viewTurns");
+    const vh = $("viewHistory");
+    if (vb && vb.style.display !== "none") return "base";
+    if (vt && vt.style.display !== "none") return "teams";
+    if (vtu && vtu.style.display !== "none") return "turns";
+    if (vh && vh.style.display !== "none") return "history";
+    return "base";
+  }
+
   function showView(view) {
     show($("viewBase"), view === "base");
     show($("viewTeams"), view === "teams");
@@ -91,14 +99,14 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     showView("base");
   }
 
-  // ✅ PKCE: si está el code, se intercambia (solo aquí)
+  // ✅ PKCE exchange (solo aquí)
   async function exchangeCodeIfPresent() {
     const url = new URL(window.location.href);
     const code = url.searchParams.get("code");
     if (!code) return;
 
     setSpinner(true);
-    setDot("neutral");
+    setDot(null);
     setText("authStatusText", "Finalizando login…");
     setText("authStatus", "Procesando…");
 
@@ -110,7 +118,7 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     window.history.replaceState({}, document.title, url.toString());
   }
 
-  // ---- Utils: timeout para promesas ----
+  // ---- timeout helper ----
   function withTimeout(promise, ms, label = "timeout") {
     let t;
     const timeout = new Promise((_, rej) => {
@@ -126,7 +134,6 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
   let refreshInFlight = null;
 
   async function refreshSessionUI(source = "") {
-    // Evita carreras: si ya hay una en vuelo, reusamos
     if (refreshInFlight) return refreshInFlight;
 
     const run = (async () => {
@@ -135,11 +142,10 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
 
       try {
         setSpinner(true);
-        setDot("neutral");
+        setDot(null);
         setText("authStatusText", source ? `Verificando sesión… (${source})` : "Verificando sesión…");
         setText("authStatus", "Conectando…");
 
-        // Si esto se queda pegado por storage o red, que no congele UI
         const user = await withTimeout(getSessionUser(), 8000, "getSessionUser");
 
         if (!user) {
@@ -147,7 +153,6 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
           lastUserId = null;
 
           setUserUI(null);
-
           if (loginBtn) loginBtn.disabled = false;
           if (logoutBtn) logoutBtn.disabled = true;
 
@@ -158,9 +163,8 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
           return;
         }
 
-        // logged-in UI
+        // logged-in
         setUserUI(user);
-
         if (loginBtn) loginBtn.disabled = true;
         if (logoutBtn) logoutBtn.disabled = false;
 
@@ -168,7 +172,7 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
         setText("authStatusText", `✅ Conectado: ${user.email || user.id}`);
         setText("authStatus", "Conectado ✅");
 
-        // Cargar players si es la primera vez o cambió usuario
+        // cargar players si primera vez o cambió usuario
         if (!Store.ready || lastUserId !== user.id) {
           lastUserId = user.id;
           const players = await withTimeout(listPlayers(), 12000, "listPlayers");
@@ -181,28 +185,21 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
       } catch (e) {
         console.error("❌ refreshSessionUI", e);
 
-        // UI consistente: nunca dejarlo en “Conectando…”
         setSpinner(false);
         setDot("bad");
-
-        // Rehabilitar login para que el usuario pueda intentar
         if ($("loginGoogle")) $("loginGoogle").disabled = false;
         if ($("logoutBtn")) $("logoutBtn").disabled = true;
 
         setText("authStatusText", "❌ Error verificando sesión.");
         setText("authStatus", e?.message || String(e));
 
-        // Importante: no dejar Store.ready en true si algo falló
         Store.ready = false;
         lastUserId = null;
         setUserUI(null);
       }
     })();
 
-    refreshInFlight = run.finally(() => {
-      refreshInFlight = null;
-    });
-
+    refreshInFlight = run.finally(() => { refreshInFlight = null; });
     return refreshInFlight;
   }
 
@@ -210,39 +207,35 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     const loginBtn = $("loginGoogle");
     const logoutBtn = $("logoutBtn");
 
-    if (!loginBtn) {
-      console.error("❌ No existe #loginGoogle");
-      return;
+    if (loginBtn) {
+      loginBtn.onclick = async () => {
+        try {
+          setSpinner(true);
+          setDot(null);
+          setText("authStatusText", "Abriendo Google…");
+          setText("authStatus", "Espera…");
+          await signInWithGoogle();
+        } catch (e) {
+          console.error(e);
+          setSpinner(false);
+          setDot("bad");
+          setText("authStatusText", "Error al iniciar sesión.");
+          setText("authStatus", `❌ ${e?.message || e}`);
+        }
+      };
     }
-
-    loginBtn.onclick = async () => {
-      try {
-        setSpinner(true);
-        setDot("neutral");
-        setText("authStatusText", "Abriendo Google…");
-        setText("authStatus", "Espera…");
-        await signInWithGoogle();
-      } catch (e) {
-        console.error(e);
-        setSpinner(false);
-        setDot("bad");
-        setText("authStatusText", "Error al iniciar sesión.");
-        setText("authStatus", `❌ ${e?.message || e}`);
-      }
-    };
 
     if (logoutBtn) {
       logoutBtn.onclick = async () => {
         try {
           logoutBtn.disabled = true;
           setSpinner(true);
-          setDot("neutral");
+          setDot(null);
           setText("authStatusText", "Cerrando sesión…");
           setText("authStatus", "");
 
           await signOut();
 
-          // limpiar UI/Store local
           Store.ready = false;
           Store.setPlayers?.([]);
           lastUserId = null;
@@ -268,16 +261,15 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     window.addEventListener("focus", () => refreshSessionUI("focus").catch(console.error));
   }
 
-  // ✅ Carga módulos sin romper auth
   async function safeImport(path, tag) {
     try {
       await import(path);
       console.log(`✅ módulo cargado: ${tag}`);
+      return true;
     } catch (e) {
       console.error(`❌ fallo import ${tag} (${path})`, e);
-      // No rompemos auth; solo mostramos aviso
-      setText("authStatusText", `⚠️ Módulo con error: ${tag}.`);
-      setText("authStatus", e?.message || String(e));
+      // no romper auth
+      return false;
     }
   }
 
@@ -300,20 +292,26 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
       setText("authStatus", `❌ ${e?.message || e}`);
     }
 
-    // 🔥 Importante: escuchar cambios reales de auth
-    supabase.auth.onAuthStateChange((_event, _session) => {
+    // escuchar cambios reales de auth
+    supabase.auth.onAuthStateChange(() => {
       refreshSessionUI("auth").catch(console.error);
     });
 
-    await refreshSessionUI("init");
-
-    // cargar módulos UI
+    // ✅ CLAVE: cargar módulos ANTES del refresh init
     await safeImport("./db.js", "db");
     await safeImport("./teams.js", "teams");
     await safeImport("./turns.js", "turns");
     await safeImport("./history.js", "history");
 
-    console.log("✅ app.js listo");
+    // Ahora sí: init de sesión (dispara op:storeReady cuando corresponde)
+    await refreshSessionUI("init");
+
+    // y forzamos render de la vista actual por si el store ya estaba listo
+    const v = currentViewKey();
+    window.OP = window.OP || {};
+    window.OP.refresh?.(v);
+
+    console.log("✅ app.js listo (módulos antes de storeReady)");
   }
 
   if (document.readyState === "loading") {
