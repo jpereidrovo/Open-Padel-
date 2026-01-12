@@ -1,12 +1,7 @@
 // db.js — Base de jugadores (UI + CRUD Supabase + selección para pool)
 
 import { Store } from "./store.js";
-import {
-  listPlayers,
-  upsertPlayer,
-  deletePlayer,
-  deleteAllPlayers
-} from "./supabaseApi.js";
+import { listPlayers, upsertPlayer, deletePlayer, deleteAllPlayers } from "./supabaseApi.js";
 
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -18,10 +13,6 @@ import {
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#039;");
-
-  function show(el, yes) {
-    if (el) el.style.display = yes ? "" : "none";
-  }
 
   function getPoolSet() {
     return new Set(Store.state?.pool || []);
@@ -87,12 +78,8 @@ import {
     const needD = k - d;
     const needR = k - r;
 
-    const availableD = (Store.players || []).filter(
-      (p) => p.side === "D" && !current.has(p.id)
-    );
-    const availableR = (Store.players || []).filter(
-      (p) => p.side === "R" && !current.has(p.id)
-    );
+    const availableD = (Store.players || []).filter((p) => p.side === "D" && !current.has(p.id));
+    const availableR = (Store.players || []).filter((p) => p.side === "R" && !current.has(p.id));
 
     for (let i = 0; i < needD && i < availableD.length; i++) current.add(availableD[i].id);
     for (let i = 0; i < needR && i < availableR.length; i++) current.add(availableR[i].id);
@@ -118,11 +105,15 @@ import {
 
     if (tagBase) tagBase.textContent = String(playersCount);
     if (tagTeams) tagTeams.textContent = String(teamsCount);
-
     if (pillInfo) pillInfo.textContent = `N: ${selected} • Canchas: ${courts}`;
   }
 
-  /* -------------------- Data reload con Store.status -------------------- */
+  function updateSelectionHintIfPresent() {
+    const selHint = $("selHint");
+    if (!selHint) return;
+    selHint.textContent = poolHintText(new Set(Store.state?.pool || []));
+  }
+
   async function reloadPlayersUI(setStatus) {
     try {
       Store.setLoading?.("Cargando jugadores…");
@@ -140,18 +131,13 @@ import {
     }
   }
 
-  /* -------------------- Render -------------------- */
   function render() {
     const mount = $("baseMount");
     if (!mount) return;
 
-    // Actualiza chrome siempre
     updateChrome();
 
-    // 1) Estado: no listo y sin sesión
-    // (Tu app marca Store.ready=false al logout, así que aquí evitamos pantalla rota)
     if (!Store.ready && Store.status !== "loading") {
-      // Si hay error global, lo mostramos como tal
       if (Store.status === "error") {
         const msg = Store.error?.message || "Ocurrió un error.";
         mount.innerHTML = `
@@ -159,12 +145,11 @@ import {
             <div class="hint" style="font-weight:700;">⚠️ Error</div>
             <div class="hint muted" style="margin-top:6px;">${esc(msg)}</div>
             <div class="btns" style="margin-top:10px;">
-              <button class="primary" id="btnRetryBase">Reintentar</button>
+              <button class="primary" id="btnRetryBase" type="button">Reintentar</button>
             </div>
           </div>
         `;
         $("btnRetryBase")?.addEventListener("click", async () => {
-          // Reintenta cargar desde la base
           const statusEl = $("dbStatus");
           const setStatus = (m, cls = "muted") => {
             if (!statusEl) return;
@@ -185,7 +170,6 @@ import {
       return;
     }
 
-    // 2) Estado: loading
     if (Store.status === "loading") {
       mount.innerHTML = `
         <div class="card" style="margin-top:10px;">
@@ -195,34 +179,18 @@ import {
       return;
     }
 
-    // 3) Estado: error (aunque Store.ready sea true o false, priorizamos mostrarlo)
     if (Store.status === "error") {
       const msg = Store.error?.message || "Ocurrió un error.";
       mount.innerHTML = `
         <div class="card" style="margin-top:10px;">
           <div class="hint" style="font-weight:700;">⚠️ Error</div>
           <div class="hint muted" style="margin-top:6px;">${esc(msg)}</div>
-          <div class="btns" style="margin-top:10px;">
-            <button class="primary" id="btnRetryBase">Reintentar</button>
-          </div>
         </div>
       `;
-      $("btnRetryBase")?.addEventListener("click", async () => {
-        const statusEl = $("dbStatus");
-        const setStatus = (m, cls = "muted") => {
-          if (!statusEl) return;
-          statusEl.textContent = m || "";
-          statusEl.className = "hint " + cls;
-        };
-        await reloadPlayersUI(setStatus);
-        render();
-      });
       return;
     }
 
-    // 4) Estado: ready (UI normal)
-    const poolSet = getPoolSet();
-    const selectedIds = new Set(poolSet);
+    const selectedIds = new Set(getPoolSet());
 
     mount.innerHTML = `
       <div class="card" style="margin-top:10px;">
@@ -295,7 +263,6 @@ import {
       updateChrome();
     };
 
-    // --- List rendering ---
     const playersList = $("playersList");
     const allPlayers = Store.players || [];
 
@@ -356,7 +323,7 @@ import {
             .join("")
         : `<div class="hint muted">No hay jugadores.</div>`;
 
-      // Selection handlers
+      // Selection handlers (SIN re-render)
       playersList.querySelectorAll("[data-sel]").forEach((cb) => {
         cb.addEventListener("change", () => {
           const id = cb.getAttribute("data-sel");
@@ -411,16 +378,11 @@ import {
             await reloadPlayersUI(setStatus);
 
             // mantener selección: eliminar ids que ya no existan
-            const newSet = new Set(selectedIds);
             const exists = new Set((Store.players || []).map((p) => p.id));
-            for (const x of newSet) if (!exists.has(x)) newSet.delete(x);
-
-            selectedIds.clear();
-            for (const x of newSet) selectedIds.add(x);
+            for (const x of Array.from(selectedIds)) if (!exists.has(x)) selectedIds.delete(x);
 
             setPoolFromSelection(selectedIds);
             refreshHint();
-
             setStatus("✅ Guardado.", "ok");
           } catch (e) {
             console.error(e);
@@ -445,7 +407,6 @@ import {
 
             await reloadPlayersUI(setStatus);
             refreshHint();
-
             setStatus("✅ Borrado.", "ok");
           } catch (e) {
             console.error(e);
@@ -457,12 +418,10 @@ import {
 
     drawList("");
 
-    // --- Search ---
     $("searchPlayers")?.addEventListener("input", (e) => {
       drawList(e.target.value || "");
     });
 
-    // --- Add player ---
     $("btnAdd")?.addEventListener("click", async () => {
       try {
         const name = String($("newName")?.value || "").trim();
@@ -490,14 +449,12 @@ import {
       }
     });
 
-    // --- Reload ---
     $("btnReload")?.addEventListener("click", async () => {
       await reloadPlayersUI(setStatus);
       drawList($("searchPlayers")?.value || "");
       refreshHint();
     });
 
-    // --- Delete all ---
     $("btnDeleteAll")?.addEventListener("click", async () => {
       const msg = "Esto borrará TODOS los jugadores de la base. ¿Seguro?";
       if (!confirm(msg)) return;
@@ -520,7 +477,6 @@ import {
       }
     });
 
-    // --- Select all / deselect all / fill ---
     $("btnSelectAll")?.addEventListener("click", () => {
       selectedIds.clear();
       (Store.players || []).forEach((p) => selectedIds.add(p.id));
@@ -545,7 +501,6 @@ import {
       drawList($("searchPlayers")?.value || "");
     });
 
-    // Inicial: status / hint
     setStatus("✅ Base lista.", "muted");
     refreshHint();
   }
@@ -558,16 +513,14 @@ import {
     if (view === "base") render();
   };
 
-  // Eventos (mantengo los tuyos, y agrego el nuevo global)
+  // Render solo cuando realmente cambia el listado o se entra a la vista
   window.addEventListener("op:storeReady", render);
   window.addEventListener("op:playersChanged", render);
-  window.addEventListener("op:stateChanged", updateChrome);
+
+  // 🔥 IMPORTANTE: NO re-render completo por storeChanged (evita parpadeo)
   window.addEventListener("op:storeChanged", () => {
     updateChrome();
-    // Solo re-render completo si estamos en la vista base
-    // (evita repintar “en background” otras pestañas)
-    const baseVisible = $("viewBase") && $("viewBase").style.display !== "none";
-    if (baseVisible) render();
+    updateSelectionHintIfPresent();
   });
 
   document.addEventListener("DOMContentLoaded", () => {
