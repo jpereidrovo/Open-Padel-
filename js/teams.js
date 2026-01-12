@@ -1,11 +1,10 @@
-// teams.js — Equipos (pool -> A/B) + guardar a historial (sessions)
+// teams.js — Equipos (pool -> A/B) + guardar a historial (sessions) con multi-sesión
 
 import { Store } from "./store.js";
 import { saveTeamsToHistory } from "./supabaseApi.js";
 
 (function () {
   const $ = (id) => document.getElementById(id);
-
   const esc = (s) =>
     String(s ?? "")
       .replaceAll("&", "&amp;")
@@ -38,33 +37,23 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
   }
 
   function splitBySide(list) {
-    const D = list
-      .filter((p) => p.side === "D")
-      .sort((a, b) => Number(b.rating) - Number(a.rating));
-    const R = list
-      .filter((p) => p.side === "R")
-      .sort((a, b) => Number(b.rating) - Number(a.rating));
+    const D = list.filter((p) => p.side === "D").sort((a, b) => Number(b.rating) - Number(a.rating));
+    const R = list.filter((p) => p.side === "R").sort((a, b) => Number(b.rating) - Number(a.rating));
     return { D, R };
   }
 
-  // Balance simple: reparte alternando (top-down) por lado para promedios parecidos
   function autoBalanceTeams(poolPlayers) {
     const { D, R } = splitBySide(poolPlayers);
 
-    if (poolPlayers.length % 4 !== 0) {
-      throw new Error("El pool debe ser múltiplo de 4.");
-    }
-    if (D.length !== R.length) {
-      throw new Error("El pool debe tener igual cantidad de Derecha (D) y Revés (R).");
-    }
+    if (poolPlayers.length % 4 !== 0) throw new Error("El pool debe ser múltiplo de 4.");
+    if (D.length !== R.length) throw new Error("El pool debe tener igual cantidad de Derecha (D) y Revés (R).");
 
     const A = [];
     const B = [];
 
     for (let i = 0; i < R.length; i++) (i % 2 === 0 ? A : B).push(R[i]);
-    for (let i = 0; i < D.length; i++) (i % 2 === 0 ? B : A).push(D[i]); // cruzado
+    for (let i = 0; i < D.length; i++) (i % 2 === 0 ? B : A).push(D[i]);
 
-    // Ajuste rápido
     let tries = 0;
     while (tries < 20) {
       tries++;
@@ -79,16 +68,11 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       const srcR = src.filter((p) => p.side === "R");
       const dstR = dst.filter((p) => p.side === "R");
 
-      const swapSide =
-        srcD.length && dstD.length ? "D" : srcR.length && dstR.length ? "R" : null;
+      const swapSide = srcD.length && dstD.length ? "D" : srcR.length && dstR.length ? "R" : null;
       if (!swapSide) break;
 
-      const sList = src
-        .filter((p) => p.side === swapSide)
-        .sort((a, b) => Number(a.rating) - Number(b.rating));
-      const dList = dst
-        .filter((p) => p.side === swapSide)
-        .sort((a, b) => Number(a.rating) - Number(b.rating));
+      const sList = src.filter((p) => p.side === swapSide).sort((a, b) => Number(a.rating) - Number(b.rating));
+      const dList = dst.filter((p) => p.side === swapSide).sort((a, b) => Number(a.rating) - Number(b.rating));
 
       const s = sList[Math.floor(sList.length / 2)];
       const d = dList[Math.floor(dList.length / 2)];
@@ -103,93 +87,28 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
     return { teamA: A, teamB: B };
   }
 
-  /* -------------------- UX global: badges/pill -------------------- */
-  function computeCourtsCountFromPool() {
-    const poolIds = Store.state?.pool || [];
-    const poolPlayers = getPoolPlayers();
-    const total = poolIds.length;
-    if (!total) return 0;
-
-    const d = poolPlayers.filter((p) => p.side === "D").length;
-    const r = poolPlayers.filter((p) => p.side === "R").length;
-
-    if (total % 4 === 0 && d === r) return total / 4;
-    return 0;
-  }
-
-  function updateChrome() {
-    const tagBase = $("tagBase");
-    const tagTeams = $("tagTeams");
-    const pillInfo = $("pillInfo");
-
-    const playersCount =
-      Store.getPlayersCount?.() ?? (Array.isArray(Store.players) ? Store.players.length : 0);
-
-    const teamsCount =
-      Store.getTeamsCount?.() ??
-      ((Store.state?.team_a?.length || 0) + (Store.state?.team_b?.length || 0));
-
-    const selected =
-      Store.getPoolCount?.() ?? (Array.isArray(Store.state?.pool) ? Store.state.pool.length : 0);
-
-    const courts = computeCourtsCountFromPool();
-
-    if (tagBase) tagBase.textContent = String(playersCount);
-    if (tagTeams) tagTeams.textContent = String(teamsCount);
-    if (pillInfo) pillInfo.textContent = `N: ${selected} • Canchas: ${courts}`;
-  }
-
   function render() {
     const mount = $("teamsMount");
     if (!mount) return;
 
-    updateChrome();
-
-    // No sesión / no listo
     if (!Store.ready && Store.status !== "loading") {
-      if (Store.status === "error") {
-        const msg = Store.error?.message || "Ocurrió un error.";
-        mount.innerHTML = `
-          <div class="card" style="margin-top:10px;">
-            <div class="hint" style="font-weight:700;">⚠️ Error</div>
-            <div class="hint muted" style="margin-top:6px;">${esc(msg)}</div>
-          </div>
-        `;
-        return;
-      }
-
-      mount.innerHTML = `
-        <div class="card" style="margin-top:10px;">
-          <div class="hint muted">Inicia sesión para usar Equipos.</div>
-        </div>
-      `;
+      mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint muted">Inicia sesión para usar Equipos.</div></div>`;
       return;
     }
-
-    // Loading global
     if (Store.status === "loading") {
-      mount.innerHTML = `
-        <div class="card" style="margin-top:10px;">
-          <div class="hint muted">Cargando…</div>
-        </div>
-      `;
+      mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint muted">Cargando…</div></div>`;
       return;
     }
-
-    // Error global
     if (Store.status === "error") {
       const msg = Store.error?.message || "Ocurrió un error.";
-      mount.innerHTML = `
-        <div class="card" style="margin-top:10px;">
-          <div class="hint" style="font-weight:700;">⚠️ Error</div>
-          <div class="hint muted" style="margin-top:6px;">${esc(msg)}</div>
-        </div>
-      `;
+      mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint error">${esc(msg)}</div></div>`;
       return;
     }
 
     const poolPlayers = getPoolPlayers();
     const session_date = Store.state?.session_date || todayISO();
+    const session_seq = Store.state?.session_seq || null;
+    const session_key = Store.state?.session_key || null;
 
     const teamA = Array.isArray(Store.state?.team_a) ? Store.state.team_a : [];
     const teamB = Array.isArray(Store.state?.team_b) ? Store.state.team_b : [];
@@ -202,18 +121,23 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
     const bD = countSide(teamB, "D"),
       bR = countSide(teamB, "R");
 
+    const sessionLabel = session_key
+      ? `Sesión actual: ${esc(session_date)} - ${esc(session_seq || session_key.split("-").pop())}`
+      : "Sesión actual: — (aún no guardada)";
+
     mount.innerHTML = `
       <div class="card" style="margin-top:10px;">
         <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:end; justify-content:space-between;">
           <div>
             <label>Fecha</label>
             <input id="teamsDate" type="date" value="${esc(session_date)}" />
+            <div class="hint muted" style="margin-top:6px;">${sessionLabel}</div>
           </div>
 
           <div class="btns">
             <button class="ghost" id="btnAutoTeams" type="button">Autoarmar</button>
             <button class="ghost" id="btnClearTeams" type="button">Limpiar equipos</button>
-            <button class="primary" id="btnSaveTeams" type="button">Guardar equipos</button>
+            <button class="primary" id="btnSaveTeams" type="button">Guardar equipos (nueva sesión)</button>
           </div>
         </div>
 
@@ -228,11 +152,7 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
             poolPlayers.length
               ? poolPlayers
                   .map(
-                    (p) => `
-            <div class="hint muted">• ${esc(p.name)} — ${esc(p.side)} — ${Number(
-                      p.rating || 0
-                    ).toFixed(1)}</div>
-          `
+                    (p) => `<div class="hint muted">• ${esc(p.name)} — ${esc(p.side)} — ${Number(p.rating || 0).toFixed(1)}</div>`
                   )
                   .join("")
               : `<div class="hint muted">No hay jugadores en el pool. Selecciónalos en Base.</div>`
@@ -246,19 +166,12 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
           <div class="card" style="background: rgba(0,0,0,.12);">
             <h4 style="margin:0 0 8px;">Equipo A</h4>
-            <div class="hint muted">Promedio: <b>${esc(aAvg)}</b> • D:${esc(aD)} R:${esc(
-      aR
-    )}</div>
+            <div class="hint muted">Promedio: <b>${esc(aAvg)}</b> • D:${esc(aD)} R:${esc(aR)}</div>
             <div style="margin-top:10px;">
               ${
                 teamA.length
                   ? teamA
-                      .map(
-                        (p) =>
-                          `<div class="hint muted">${esc(p.name)} • ${esc(p.side)} • ${Number(
-                            p.rating || 0
-                          ).toFixed(1)}</div>`
-                      )
+                      .map((p) => `<div class="hint muted">${esc(p.name)} • ${esc(p.side)} • ${Number(p.rating || 0).toFixed(1)}</div>`)
                       .join("")
                   : `<div class="hint muted">—</div>`
               }
@@ -267,19 +180,12 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
 
           <div class="card" style="background: rgba(0,0,0,.12);">
             <h4 style="margin:0 0 8px;">Equipo B</h4>
-            <div class="hint muted">Promedio: <b>${esc(bAvg)}</b> • D:${esc(bD)} R:${esc(
-      bR
-    )}</div>
+            <div class="hint muted">Promedio: <b>${esc(bAvg)}</b> • D:${esc(bD)} R:${esc(bR)}</div>
             <div style="margin-top:10px;">
               ${
                 teamB.length
                   ? teamB
-                      .map(
-                        (p) =>
-                          `<div class="hint muted">${esc(p.name)} • ${esc(p.side)} • ${Number(
-                            p.rating || 0
-                          ).toFixed(1)}</div>`
-                      )
+                      .map((p) => `<div class="hint muted">${esc(p.name)} • ${esc(p.side)} • ${Number(p.rating || 0).toFixed(1)}</div>`)
                       .join("")
                   : `<div class="hint muted">—</div>`
               }
@@ -296,14 +202,15 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       statusEl.className = "hint " + cls;
     };
 
-    // fecha editable
     $("teamsDate")?.addEventListener("change", (e) => {
-      const v = e.target.value;
-      Store.setState({ session_date: v });
-      updateChrome();
+      Store.setState({
+        session_date: e.target.value,
+        session_key: null,
+        session_seq: null,
+      });
+      render();
     });
 
-    // autoarmar
     $("btnAutoTeams")?.addEventListener("click", () => {
       try {
         const pool = getPoolPlayers();
@@ -311,11 +218,7 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
 
         const { teamA: A, teamB: B } = autoBalanceTeams(pool);
 
-        Store.setState({
-          team_a: A,
-          team_b: B,
-        });
-
+        Store.setState({ team_a: A, team_b: B });
         setStatus("✅ Equipos autoarmados.", "ok");
         render();
       } catch (e) {
@@ -323,14 +226,12 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       }
     });
 
-    // limpiar equipos
     $("btnClearTeams")?.addEventListener("click", () => {
-      Store.setState({ team_a: [], team_b: [] });
+      Store.setState({ team_a: [], team_b: [], session_key: null, session_seq: null });
       setStatus("Listo. Equipos limpiados.", "muted");
       render();
     });
 
-    // guardar equipos -> historial
     $("btnSaveTeams")?.addEventListener("click", async () => {
       try {
         const date = $("teamsDate")?.value || Store.state?.session_date || todayISO();
@@ -340,11 +241,19 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
         if (!A.length || !B.length) throw new Error("Primero arma los equipos A/B.");
         if ((A.length + B.length) % 4 !== 0) throw new Error("Total de jugadores debe ser múltiplo de 4.");
 
-        setStatus("Guardando equipos en historial…", "muted");
+        setStatus("Guardando equipos (nueva sesión)…", "muted");
 
-        await saveTeamsToHistory(date, A.length + B.length, A, B);
+        const saved = await saveTeamsToHistory(date, A.length + B.length, A, B);
 
-        setStatus("✅ Equipos guardados. Ve a Historial y recarga.", "ok");
+        // Guarda la sesión creada en el estado para que Turnos use la misma
+        Store.setState({
+          session_date: date,
+          session_key: saved.session_key,
+          session_seq: saved.session_seq,
+        });
+
+        setStatus(`✅ Equipos guardados como ${saved.session_key}`, "ok");
+        render();
       } catch (e) {
         console.error(e);
         setStatus(`❌ Error al guardar equipos: ${e?.message || e}`, "error");
@@ -360,21 +269,10 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
     if (view === "teams") render();
   };
 
-  // Eventos: nuevos + compatibilidad
   window.addEventListener("op:storeReady", render);
   window.addEventListener("op:stateChanged", () => {
-    updateChrome();
-    const teamsView = document.getElementById("viewTeams");
-    if (teamsView && teamsView.style.display !== "none") render();
+    const view = document.getElementById("viewTeams");
+    if (view && view.style.display !== "none") render();
   });
-  window.addEventListener("op:storeChanged", () => {
-    updateChrome();
-    const teamsView = document.getElementById("viewTeams");
-    if (teamsView && teamsView.style.display !== "none") render();
-  });
-
-  document.addEventListener("DOMContentLoaded", () => {
-    updateChrome();
-    render();
-  });
+  document.addEventListener("DOMContentLoaded", render);
 })();
