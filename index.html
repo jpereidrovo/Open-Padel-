@@ -5,11 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Open Padel</title>
 
-  <!-- evita 404 favicon -->
   <link rel="icon" href="data:,">
-
-  <!-- cache-busting -->
-  <link rel="stylesheet" href="./css/styles.css?v=20260112-2">
+  <link rel="stylesheet" href="./css/styles.css?v=20260112-99">
 
   <style>
     /* UX helpers (no pisa tu CSS: son utilitarios) */
@@ -37,71 +34,25 @@
     }
     .spinner.on { display:inline-block; }
     @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* Toasts (se usa desde JS) */
-    .toasts {
-      position: fixed;
-      right: 14px;
-      bottom: 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      z-index: 9999;
-      max-width: min(420px, calc(100vw - 28px));
-    }
-    .toast {
-      background: rgba(17,24,39,.96);
-      color: #fff;
-      border-radius: 14px;
-      padding: 10px 12px;
-      box-shadow: 0 12px 30px rgba(0,0,0,.25);
-      display:flex;
-      gap:10px;
-      align-items:flex-start;
-    }
-    .toast .t-title { font-weight:700; margin-bottom:2px; }
-    .toast .t-body { font-size:13px; opacity:.92; }
-    .toast .t-x {
-      margin-left:auto;
-      border: none;
-      background: transparent;
-      color: rgba(255,255,255,.85);
-      cursor: pointer;
-      font-size: 16px;
-      line-height: 1;
-      padding: 2px 6px;
-      border-radius: 10px;
-    }
-    .toast .t-x:hover { background: rgba(255,255,255,.08); }
   </style>
 </head>
 
 <body>
-  <!-- Toast container -->
-  <div id="toasts" class="toasts" aria-live="polite" aria-relevant="additions"></div>
-
   <div class="app">
     <aside class="sidebar">
       <h2>Open Padel</h2>
 
       <nav>
         <button id="navBase" class="nav-btn active" type="button">
-          Base de jugadores
-          <span id="tagBase" class="badge">0</span>
+          Base de jugadores <span id="tagBase" class="badge">0</span>
         </button>
 
         <button id="navTeams" class="nav-btn" type="button">
-          Equipos
-          <span id="tagTeams" class="badge">0</span>
+          Equipos <span id="tagTeams" class="badge">0</span>
         </button>
 
-        <button id="navTurns" class="nav-btn" type="button">
-          Turnos
-        </button>
-
-        <button id="navHistory" class="nav-btn" type="button">
-          Historial
-        </button>
+        <button id="navTurns" class="nav-btn" type="button">Turnos</button>
+        <button id="navHistory" class="nav-btn" type="button">Historial</button>
       </nav>
 
       <div class="sidebar-footer">
@@ -124,8 +75,16 @@
           </div>
 
           <div class="auth-actions">
-            <button class="primary" id="loginGoogle" type="button">Iniciar sesión con Google</button>
-            <button class="ghost" id="logoutBtn" type="button" disabled>Cerrar sesión</button>
+            <!-- ✅ onclick directo: NO depende de que app.js “wiree” -->
+            <button class="primary" id="loginGoogle" type="button"
+              onclick="window.OP_LOGIN && window.OP_LOGIN()">
+              Iniciar sesión con Google
+            </button>
+
+            <button class="ghost" id="logoutBtn" type="button" disabled
+              onclick="window.OP_LOGOUT && window.OP_LOGOUT()">
+              Cerrar sesión
+            </button>
           </div>
         </div>
 
@@ -162,119 +121,6 @@
     </main>
   </div>
 
-  <!-- ✅ jsPDF (PDF en Turnos) -->
-  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
-
-  <!-- ✅ LOGIN “a prueba de fallos”: NO depende de app.js -->
-  <script type="module">
-    import { supabase } from "./js/supabaseClient.js?v=20260112-2";
-    import { signInWithGoogle, signOut, getSessionUser } from "./js/supabaseApi.js?v=20260112-2";
-
-    const $ = (id) => document.getElementById(id);
-    const setText = (id, t) => { const el = $(id); if (el) el.textContent = t; };
-
-    function setUserUI(user) {
-      const nameEl = $("userName");
-      const mailEl = $("userEmail");
-      const avatarEl = $("userAvatar");
-
-      if (!user) {
-        if (nameEl) nameEl.textContent = "No has iniciado sesión";
-        if (mailEl) mailEl.textContent = "—";
-        if (avatarEl) avatarEl.innerHTML = "";
-        return;
-      }
-
-      const meta = user.user_metadata || {};
-      const fullName = meta.full_name || meta.name || user.email || user.id;
-      const email = user.email || "—";
-      const pic = meta.avatar_url || meta.picture || "";
-
-      if (nameEl) nameEl.textContent = fullName;
-      if (mailEl) mailEl.textContent = email;
-
-      if (avatarEl) {
-        avatarEl.innerHTML = pic
-          ? `<img src="${pic}" alt="" referrerpolicy="no-referrer" />`
-          : `<span style="font-size:12px; opacity:.8;">OP</span>`;
-      }
-    }
-
-    async function exchangeCodeIfPresent() {
-      const url = new URL(window.location.href);
-      const code = url.searchParams.get("code");
-      if (!code) return;
-
-      setText("authStatusText", "Finalizando login…");
-      setText("authStatus", "Procesando…");
-
-      const { error } = await supabase.auth.exchangeCodeForSession(code);
-      if (error) throw error;
-
-      url.searchParams.delete("code");
-      url.searchParams.delete("state");
-      window.history.replaceState({}, document.title, url.toString());
-    }
-
-    async function refreshUI(source="") {
-      const loginBtn = $("loginGoogle");
-      const logoutBtn = $("logoutBtn");
-
-      setText("authStatusText", source ? `Verificando sesión… (${source})` : "Verificando sesión…");
-      setText("authStatus", "");
-
-      const user = await getSessionUser();
-
-      if (!user) {
-        setUserUI(null);
-        if (loginBtn) loginBtn.disabled = false;
-        if (logoutBtn) logoutBtn.disabled = true;
-        setText("authStatusText", "Inicia sesión para usar la app.");
-        setText("authStatus", "No conectado");
-        return;
-      }
-
-      setUserUI(user);
-      if (loginBtn) loginBtn.disabled = true;
-      if (logoutBtn) logoutBtn.disabled = false;
-      setText("authStatusText", `✅ Conectado: ${user.email || user.id}`);
-      setText("authStatus", "Conectado ✅");
-    }
-
-    // Wire buttons (independiente de app.js)
-    $("loginGoogle")?.addEventListener("click", async () => {
-      try {
-        setText("authStatusText", "Abriendo Google…");
-        setText("authStatus", "Espera…");
-        await signInWithGoogle();
-      } catch (e) {
-        console.error(e);
-        setText("authStatusText", "Error al iniciar sesión.");
-        setText("authStatus", `❌ ${e?.message || e}`);
-      }
-    });
-
-    $("logoutBtn")?.addEventListener("click", async () => {
-      try {
-        setText("authStatusText", "Cerrando sesión…");
-        setText("authStatus", "");
-        await signOut();
-        await refreshUI("signed out");
-        setTimeout(() => location.reload(), 50);
-      } catch (e) {
-        console.error(e);
-        setText("authStatusText", "Error cerrando sesión.");
-        setText("authStatus", `❌ ${e?.message || e}`);
-      }
-    });
-
-    // init
-    try { await exchangeCodeIfPresent(); } catch (e) { console.error(e); }
-    supabase.auth.onAuthStateChange(() => refreshUI("auth").catch(console.error));
-    refreshUI("init").catch(console.error);
-  </script>
-
-  <!-- Tu app principal (puede estar rota, pero ya no rompe el login) -->
-  <script type="module" src="./js/app.js?v=20260112-2"></script>
+  <script type="module" src="./js/app.js?v=20260112-99"></script>
 </body>
 </html>
