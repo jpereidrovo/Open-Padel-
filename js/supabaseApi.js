@@ -1,6 +1,6 @@
 // supabaseApi.js — API única para Open Padel (Supabase)
 // Multi-sesión por día: session_seq + session_key (YYYY-MM-DD-<n>)
-// IMPORTANTE: NO hace exchangeCodeForSession aquí; eso ya lo hace app.js (una sola vez).
+// IMPORTANTE: NO hace exchangeCodeForSession aquí; eso lo hace app.js.
 
 import { supabase } from "./supabaseClient.js";
 
@@ -16,13 +16,10 @@ function makeSessionKey(dateISO, seq) {
 
 // ---------------- AUTH ----------------
 export async function getSessionUser() {
-  // NO hacemos exchangeCodeForSession aquí para evitar el warning PKCE por doble intercambio
-
   const { data: s1, error: e1 } = await supabase.auth.getSession();
   if (e1) throw e1;
   if (s1?.session?.user) return s1.session.user;
 
-  // fallback
   const { data: u, error: e2 } = await supabase.auth.getUser();
   if (e2) return null;
   return u?.user || null;
@@ -129,7 +126,6 @@ async function getNextSessionSeq(dateISO) {
 /**
  * Guarda equipos como NUEVA sesión del día (por defecto).
  * Devuelve: { session_key, session_seq }
- * Para actualizar una existente: options.session_seq
  */
 export async function saveTeamsToHistory(session_date, totalPlayers, teamA, teamB, options = {}) {
   await requireSession();
@@ -259,12 +255,6 @@ export async function getHistoryDetailByKey(session_key) {
   return { session, results };
 }
 
-export async function getHistoryDetail(session_date) {
-  const latest = await getLatestSessionKeyByDate(session_date);
-  if (!latest?.session_key) return { session: null, results: null };
-  return getHistoryDetailByKey(latest.session_key);
-}
-
 export async function deleteResultsByKey(session_key) {
   await requireSession();
 
@@ -298,5 +288,31 @@ export async function deleteSessionByKey(session_key) {
     .delete()
     .eq("group_code", GROUP_CODE)
     .eq("session_key", key);
+  if (e2) throw e2;
+}
+
+/**
+ * Borra TODA una fecha:
+ * - todas las sesiones de esa fecha
+ * - todos los resultados de esa fecha
+ * Resultado: esa fecha desaparece del historial (si no quedan sesiones).
+ */
+export async function deleteHistoryDate(session_date) {
+  await requireSession();
+
+  const date = cleanDate(session_date);
+
+  const { error: e1 } = await supabase
+    .from("results")
+    .delete()
+    .eq("group_code", GROUP_CODE)
+    .eq("session_date", date);
+  if (e1) throw e1;
+
+  const { error: e2 } = await supabase
+    .from("sessions")
+    .delete()
+    .eq("group_code", GROUP_CODE)
+    .eq("session_date", date);
   if (e2) throw e2;
 }
