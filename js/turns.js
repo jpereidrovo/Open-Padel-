@@ -5,12 +5,13 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
 (function () {
   const $ = (id) => document.getElementById(id);
-  const esc = (s) => String(s ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+  const esc = (s) =>
+    String(s ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
 
   function todayISO() {
     const d = new Date();
@@ -20,6 +21,48 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     return `${yyyy}-${mm}-${dd}`;
   }
 
+  /* -------------------- UX global: badges/pill -------------------- */
+  function getPoolPlayers() {
+    const poolIds = new Set(Store.state?.pool || []);
+    return (Store.players || []).filter((p) => poolIds.has(p.id));
+  }
+
+  function computeCourtsCountFromPool() {
+    const poolIds = Store.state?.pool || [];
+    const poolPlayers = getPoolPlayers();
+    const total = poolIds.length;
+    if (!total) return 0;
+
+    const d = poolPlayers.filter((p) => p.side === "D").length;
+    const r = poolPlayers.filter((p) => p.side === "R").length;
+
+    if (total % 4 === 0 && d === r) return total / 4;
+    return 0;
+  }
+
+  function updateChrome() {
+    const tagBase = $("tagBase");
+    const tagTeams = $("tagTeams");
+    const pillInfo = $("pillInfo");
+
+    const playersCount =
+      Store.getPlayersCount?.() ?? (Array.isArray(Store.players) ? Store.players.length : 0);
+
+    const teamsCount =
+      Store.getTeamsCount?.() ??
+      ((Store.state?.team_a?.length || 0) + (Store.state?.team_b?.length || 0));
+
+    const selected =
+      Store.getPoolCount?.() ?? (Array.isArray(Store.state?.pool) ? Store.state.pool.length : 0);
+
+    const courts = computeCourtsCountFromPool();
+
+    if (tagBase) tagBase.textContent = String(playersCount);
+    if (tagTeams) tagTeams.textContent = String(teamsCount);
+    if (pillInfo) pillInfo.textContent = `N: ${selected} • Canchas: ${courts}`;
+  }
+
+  /* -------------------- Scores helpers -------------------- */
   function scoreDigits(raw) {
     return String(raw || "").replace(/\D/g, "").slice(0, 2);
   }
@@ -47,9 +90,14 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     return sc.a > sc.b ? "A" : "B";
   }
 
+  /* -------------------- Turn generation -------------------- */
   function buildPairs(teamPlayers) {
-    const D = teamPlayers.filter(p => p.side === "D").sort((a,b)=>Number(b.rating)-Number(a.rating));
-    const R = teamPlayers.filter(p => p.side === "R").sort((a,b)=>Number(b.rating)-Number(a.rating));
+    const D = teamPlayers
+      .filter((p) => p.side === "D")
+      .sort((a, b) => Number(b.rating) - Number(a.rating));
+    const R = teamPlayers
+      .filter((p) => p.side === "R")
+      .sort((a, b) => Number(b.rating) - Number(a.rating));
     const pairs = [];
     const n = Math.min(D.length, R.length);
     for (let i = 0; i < n; i++) pairs.push([D[i], R[i]]);
@@ -79,10 +127,10 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       let best = null;
 
       for (let attempt = 0; attempt < 40; attempt++) {
-        const AD = shuffle(teamA.filter(p => p.side === "D"));
-        const AR = shuffle(teamA.filter(p => p.side === "R"));
-        const BD = shuffle(teamB.filter(p => p.side === "D"));
-        const BR = shuffle(teamB.filter(p => p.side === "R"));
+        const AD = shuffle(teamA.filter((p) => p.side === "D"));
+        const AR = shuffle(teamA.filter((p) => p.side === "R"));
+        const BD = shuffle(teamB.filter((p) => p.side === "D"));
+        const BR = shuffle(teamB.filter((p) => p.side === "R"));
 
         const nA = Math.min(AD.length, AR.length);
         const nB = Math.min(BD.length, BR.length);
@@ -112,7 +160,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
           court: i + 1,
           top: { team: "A", pair: best.Ause[i] },
           bottom: { team: "B", pair: best.Buse[i] },
-          scoreRaw: ""
+          scoreRaw: "",
         });
       }
 
@@ -160,7 +208,9 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
     const detail = await getHistoryDetail(dateISO);
     const session = detail?.session;
-    if (!session) throw new Error("No hay equipos guardados en esta fecha. Ve a Equipos y guarda primero.");
+    if (!session) {
+      throw new Error("No hay equipos guardados en esta fecha. Ve a Equipos y guarda primero.");
+    }
     return { A: session.team_a || [], B: session.team_b || [] };
   }
 
@@ -168,8 +218,48 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     const mount = $("turnsMount");
     if (!mount) return;
 
-    if (!Store.ready) {
-      mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint muted">Inicia sesión para usar Turnos.</div></div>`;
+    updateChrome();
+
+    // No sesión / no listo
+    if (!Store.ready && Store.status !== "loading") {
+      if (Store.status === "error") {
+        const msg = Store.error?.message || "Ocurrió un error.";
+        mount.innerHTML = `
+          <div class="card" style="margin-top:10px;">
+            <div class="hint" style="font-weight:700;">⚠️ Error</div>
+            <div class="hint muted" style="margin-top:6px;">${esc(msg)}</div>
+          </div>
+        `;
+        return;
+      }
+
+      mount.innerHTML = `
+        <div class="card" style="margin-top:10px;">
+          <div class="hint muted">Inicia sesión para usar Turnos.</div>
+        </div>
+      `;
+      return;
+    }
+
+    // Loading global
+    if (Store.status === "loading") {
+      mount.innerHTML = `
+        <div class="card" style="margin-top:10px;">
+          <div class="hint muted">Cargando…</div>
+        </div>
+      `;
+      return;
+    }
+
+    // Error global
+    if (Store.status === "error") {
+      const msg = Store.error?.message || "Ocurrió un error.";
+      mount.innerHTML = `
+        <div class="card" style="margin-top:10px;">
+          <div class="hint" style="font-weight:700;">⚠️ Error</div>
+          <div class="hint muted" style="margin-top:6px;">${esc(msg)}</div>
+        </div>
+      `;
       return;
     }
 
@@ -189,13 +279,15 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
             <div>
               <label>Turnos</label>
               <select id="turnCount">
-                ${[1,2,3,4].map(n => `<option value="${n}" ${n===3?"selected":""}>${n}</option>`).join("")}
+                ${[1, 2, 3, 4]
+                  .map((n) => `<option value="${n}" ${n === (Store.state?.turnCount || 3) ? "selected" : ""}>${n}</option>`)
+                  .join("")}
               </select>
             </div>
 
             <div class="btns">
-              <button class="ghost" id="btnGenTurns">Generar turnos</button>
-              <button class="primary" id="btnSaveTurns" disabled>Guardar resultados</button>
+              <button class="ghost" id="btnGenTurns" type="button">Generar turnos</button>
+              <button class="primary" id="btnSaveTurns" type="button" disabled>Guardar resultados</button>
             </div>
           </div>
         </div>
@@ -208,13 +300,19 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     `;
 
     const statusEl = $("turnsStatus");
-    const setStatus = (msg, cls="muted") => {
+    const setStatus = (msg, cls = "muted") => {
+      if (!statusEl) return;
       statusEl.textContent = msg || "";
       statusEl.className = "hint " + cls;
     };
 
     $("turnsDate")?.addEventListener("change", (e) => {
       Store.setState({ session_date: e.target.value });
+      updateChrome();
+    });
+
+    $("turnCount")?.addEventListener("change", (e) => {
+      Store.setState({ turnCount: Number(e.target.value || 3) });
     });
 
     const table = $("turnsTable");
@@ -227,6 +325,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         btnSave.disabled = true;
         return;
       }
+
       const summary = computeSummary(turnsState);
       results.innerHTML = `
         <div class="card" style="margin-top:12px;">
@@ -235,24 +334,34 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
             <b>Equipo A ${esc(summary.totalA)} puntos</b> • <b>Equipo B ${esc(summary.totalB)} puntos</b>
           </div>
           <div style="display:grid; gap:6px;">
-            ${summary.perTurn.map(pt => `
-              <div class="hint muted">Turno ${esc(pt.turn)}: A ${esc(pt.aPts)} • B ${esc(pt.bPts)}</div>
-            `).join("")}
+            ${summary.perTurn
+              .map(
+                (pt) =>
+                  `<div class="hint muted">Turno ${esc(pt.turn)}: A ${esc(pt.aPts)} • B ${esc(pt.bPts)}</div>`
+              )
+              .join("")}
           </div>
         </div>
       `;
+
       btnSave.disabled = !allScoresComplete(turnsState);
     }
 
     function drawTurnsUI() {
       if (!turnsState.length) {
-        table.innerHTML = `<div class="card" style="margin-top:12px;"><div class="hint muted">Aún no hay turnos generados.</div></div>`;
+        table.innerHTML = `
+          <div class="card" style="margin-top:12px;">
+            <div class="hint muted">Aún no hay turnos generados.</div>
+          </div>
+        `;
         results.innerHTML = "";
         btnSave.disabled = true;
         return;
       }
 
-      table.innerHTML = turnsState.map(t => `
+      table.innerHTML = turnsState
+        .map(
+          (t) => `
         <div class="card" style="margin-top:12px;">
           <h3 style="margin:0 0 10px;">Turno ${esc(t.turnIndex)} (${esc(courts)} canchas)</h3>
           <div style="overflow:auto;">
@@ -267,16 +376,25 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
                 </tr>
               </thead>
               <tbody>
-                ${t.matches.map((m, idx) => {
-                  const top = m.top.pair;
-                  const bot = m.bottom.pair;
-                  const sc = parseScore(m.scoreRaw);
-                  const win = winnerFromScore(sc);
-                  const winnerTxt = win ? (win === "A" ? "Ganador: Equipo A" : "Ganador: Equipo B") : "—";
+                ${t.matches
+                  .map((m, idx) => {
+                    const top = m.top.pair;
+                    const bot = m.bottom.pair;
+                    const sc = parseScore(m.scoreRaw);
+                    const win = winnerFromScore(sc);
+                    const winnerTxt = win
+                      ? win === "A"
+                        ? "Ganador: Equipo A"
+                        : "Ganador: Equipo B"
+                      : "—";
 
-                  return `
+                    const key = `${t.turnIndex}:${idx}`;
+
+                    return `
                     <tr>
-                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">#${esc(m.court)}</td>
+                      <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">#${esc(
+                        m.court
+                      )}</td>
                       <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">
                         ${esc(top[0]?.name)} / ${esc(top[1]?.name)}
                       </td>
@@ -287,46 +405,49 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
                         <input
                           inputmode="numeric"
                           maxlength="2"
-                          data-score="${esc(t.turnIndex)}:${esc(idx)}"
+                          data-score="${esc(key)}"
                           value="${esc(scoreDigits(m.scoreRaw))}"
                           style="width:64px;"
                           placeholder="63"
                         />
-                        <span class="hint muted" data-scorefmt="${esc(t.turnIndex)}:${esc(idx)}" style="margin-left:8px;">
+                        <span class="hint muted" data-scorefmt="${esc(key)}" style="margin-left:8px;">
                           ${esc(formatScore(m.scoreRaw))}
                         </span>
                       </td>
                       <td style="padding:8px; border-top:1px solid rgba(255,255,255,.08);">
-                        <span class="hint ${win ? "ok" : "muted"}" data-winner="${esc(t.turnIndex)}:${esc(idx)}">
+                        <span class="hint ${win ? "ok" : "muted"}" data-winner="${esc(key)}">
                           ${esc(winnerTxt)}
                         </span>
                       </td>
                     </tr>
                   `;
-                }).join("")}
+                  })
+                  .join("")}
               </tbody>
             </table>
           </div>
         </div>
-      `).join("");
+      `
+        )
+        .join("");
 
-      // Manejo fluido: NO render() en cada tecla
-      table.querySelectorAll("[data-score]").forEach(inp => {
+      // Input handlers: sin render() en cada tecla
+      table.querySelectorAll("[data-score]").forEach((inp) => {
         inp.addEventListener("input", () => {
           const digits = scoreDigits(inp.value);
           inp.value = digits;
 
           const key = inp.getAttribute("data-score");
-          const [tStr, mStr] = key.split(":");
+          const [tStr, mStr] = String(key || "").split(":");
           const tIndex = Number(tStr);
           const mIndex = Number(mStr);
 
-          const turn = turnsState.find(x => Number(x.turnIndex) === tIndex);
-          if (!turn) return;
+          const turn = turnsState.find((x) => Number(x.turnIndex) === tIndex);
+          if (!turn || !turn.matches?.[mIndex]) return;
 
           turn.matches[mIndex].scoreRaw = digits;
 
-          // Actualizar formato + ganador en la fila (sin re-render)
+          // Actualizar formato + ganador
           const fmtEl = table.querySelector(`[data-scorefmt="${CSS.escape(key)}"]`);
           if (fmtEl) fmtEl.textContent = formatScore(digits);
 
@@ -338,7 +459,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
             winEl.className = "hint " + (win ? "ok" : "muted");
           }
 
-          // refrescar resumen + habilitación guardar
           updateResultsUI();
         });
 
@@ -357,15 +477,16 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         setStatus("Generando turnos…", "muted");
 
         const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
-        const numTurns = Number($("turnCount")?.value || 3);
+        const numTurns = Number($("turnCount")?.value || Store.state?.turnCount || 3);
 
         const { A, B } = await ensureTeamsLoaded(dateISO);
         const gen = generateTurns(A, B, numTurns);
 
         Store.setState({
           session_date: dateISO,
+          turnCount: numTurns,
           courts: gen.courts,
-          turns: gen.turns
+          turns: gen.turns,
         });
 
         setStatus("✅ Turnos generados. Completa marcadores para guardar.", "ok");
@@ -381,20 +502,22 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
         const t = Array.isArray(Store.state?.turns) ? Store.state.turns : [];
         if (!t.length) throw new Error("No hay turnos para guardar.");
-        if (!allScoresComplete(t)) throw new Error("Completa todos los marcadores (2 dígitos 0–7, sin empates).");
+        if (!allScoresComplete(t)) {
+          throw new Error("Completa todos los marcadores (2 dígitos 0–7, sin empates).");
+        }
 
         setStatus("Guardando resultados en historial…", "muted");
 
         const summary = computeSummary(t);
 
-        const turnsPayload = t.map(turn => ({
+        const turnsPayload = t.map((turn) => ({
           turnIndex: turn.turnIndex,
-          matches: turn.matches.map(m => ({
+          matches: turn.matches.map((m) => ({
             court: m.court,
             top: { team: "A", pair: m.top.pair },
             bottom: { team: "B", pair: m.bottom.pair },
-            score: scoreDigits(m.scoreRaw)
-          }))
+            score: scoreDigits(m.scoreRaw),
+          })),
         }));
 
         const scoresPayload = { generatedAt: new Date().toISOString() };
@@ -402,7 +525,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         const summaryPayload = {
           totalA: summary.totalA,
           totalB: summary.totalB,
-          perTurn: summary.perTurn
+          perTurn: summary.perTurn,
         };
 
         await saveResultsToHistory(dateISO, turnsPayload, scoresPayload, summaryPayload);
@@ -415,6 +538,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     });
   }
 
+  // Integración con navegación
   window.OP = window.OP || {};
   const prev = window.OP.refresh;
   window.OP.refresh = (view) => {
@@ -422,6 +546,16 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     if (view === "turns") render();
   };
 
+  // Eventos: nuevos + compatibilidad
   window.addEventListener("op:storeReady", render);
-  document.addEventListener("DOMContentLoaded", render);
+  window.addEventListener("op:storeChanged", () => {
+    updateChrome();
+    const turnsView = document.getElementById("viewTurns");
+    if (turnsView && turnsView.style.display !== "none") render();
+  });
+
+  document.addEventListener("DOMContentLoaded", () => {
+    updateChrome();
+    render();
+  });
 })();
