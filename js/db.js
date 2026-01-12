@@ -10,12 +10,18 @@ import {
 
 (function () {
   const $ = (id) => document.getElementById(id);
-  const esc = (s) => String(s ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+
+  const esc = (s) =>
+    String(s ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+
+  function show(el, yes) {
+    if (el) el.style.display = yes ? "" : "none";
+  }
 
   function getPoolSet() {
     return new Set(Store.state?.pool || []);
@@ -25,13 +31,15 @@ import {
     Store.setState({ pool: Array.from(selectedIds) });
   }
 
-  function isMultipleOf4(n) { return n % 4 === 0; }
+  function isMultipleOf4(n) {
+    return n % 4 === 0;
+  }
 
   function countSidesByIds(ids) {
     const idSet = new Set(ids);
-    const sel = (Store.players || []).filter(p => idSet.has(p.id));
-    const d = sel.filter(p => p.side === "D").length;
-    const r = sel.filter(p => p.side === "R").length;
+    const sel = (Store.players || []).filter((p) => idSet.has(p.id));
+    const d = sel.filter((p) => p.side === "D").length;
+    const r = sel.filter((p) => p.side === "R").length;
     return { d, r, total: sel.length };
   }
 
@@ -50,36 +58,41 @@ import {
     return msg;
   }
 
+  function computeCourtsCount(ids) {
+    const { d, r, total } = countSidesByIds(ids);
+    if (total > 0 && total % 4 === 0 && d === r) return total / 4;
+    return 0;
+  }
+
   // Seleccionar “faltantes” hasta completar múltiplo de 4 con D=R
   function autoCompleteSelection(currentIds) {
     const current = new Set(currentIds);
-    const selected = (Store.players || []).filter(p => current.has(p.id));
+    const selected = (Store.players || []).filter((p) => current.has(p.id));
 
-    let d = selected.filter(p => p.side === "D").length;
-    let r = selected.filter(p => p.side === "R").length;
+    let d = selected.filter((p) => p.side === "D").length;
+    let r = selected.filter((p) => p.side === "R").length;
 
-    // objetivo: múltiplo de 4, con d=r
     let total = selected.length;
     let targetTotal = total;
 
-    // si total=0, no hacemos nada
     if (total === 0) return current;
 
-    // subimos targetTotal al siguiente múltiplo de 4
     while (targetTotal % 4 !== 0) targetTotal++;
 
-    // si d!=r, también ajustamos targetTotal si es necesario
-    // Queremos targetTotal = 2k y d=r=k
+    // Queremos targetTotal = 2k y d=r=k, y además múltiplo de 4 => k múltiplo de 2
     let k = Math.ceil(targetTotal / 2);
-    // asegurar que 2k sea múltiplo de 4 -> k múltiplo de 2
     if (k % 2 !== 0) k++;
     targetTotal = 2 * k;
 
     const needD = k - d;
     const needR = k - r;
 
-    const availableD = (Store.players || []).filter(p => p.side === "D" && !current.has(p.id));
-    const availableR = (Store.players || []).filter(p => p.side === "R" && !current.has(p.id));
+    const availableD = (Store.players || []).filter(
+      (p) => p.side === "D" && !current.has(p.id)
+    );
+    const availableR = (Store.players || []).filter(
+      (p) => p.side === "R" && !current.has(p.id)
+    );
 
     for (let i = 0; i < needD && i < availableD.length; i++) current.add(availableD[i].id);
     for (let i = 0; i < needR && i < availableR.length; i++) current.add(availableR[i].id);
@@ -87,27 +100,127 @@ import {
     return current;
   }
 
+  /* -------------------- UX global: badges/pill -------------------- */
+  function updateChrome() {
+    const tagBase = $("tagBase");
+    const tagTeams = $("tagTeams");
+    const pillInfo = $("pillInfo");
+
+    const playersCount = Store.getPlayersCount ? Store.getPlayersCount() : (Store.players || []).length;
+
+    const teamsCount =
+      Store.getTeamsCount?.() ??
+      ((Store.state?.team_a?.length || 0) + (Store.state?.team_b?.length || 0));
+
+    const selected = Store.getPoolCount ? Store.getPoolCount() : (Store.state?.pool?.length || 0);
+
+    const courts = computeCourtsCount(Store.state?.pool || []);
+
+    if (tagBase) tagBase.textContent = String(playersCount);
+    if (tagTeams) tagTeams.textContent = String(teamsCount);
+
+    if (pillInfo) pillInfo.textContent = `N: ${selected} • Canchas: ${courts}`;
+  }
+
+  /* -------------------- Data reload con Store.status -------------------- */
   async function reloadPlayersUI(setStatus) {
     try {
+      Store.setLoading?.("Cargando jugadores…");
       setStatus("Cargando jugadores…", "muted");
+
       const players = await listPlayers();
       Store.setPlayers(players);
+
+      Store.setReady?.();
       setStatus("✅ Base cargada.", "ok");
     } catch (e) {
       console.error(e);
+      Store.setError?.(e);
       setStatus(`❌ Error cargando: ${e?.message || e}`, "error");
     }
   }
 
+  /* -------------------- Render -------------------- */
   function render() {
     const mount = $("baseMount");
     if (!mount) return;
 
-    if (!Store.ready) {
-      mount.innerHTML = `<div class="card" style="margin-top:10px;"><div class="hint muted">Inicia sesión para usar la Base.</div></div>`;
+    // Actualiza chrome siempre
+    updateChrome();
+
+    // 1) Estado: no listo y sin sesión
+    // (Tu app marca Store.ready=false al logout, así que aquí evitamos pantalla rota)
+    if (!Store.ready && Store.status !== "loading") {
+      // Si hay error global, lo mostramos como tal
+      if (Store.status === "error") {
+        const msg = Store.error?.message || "Ocurrió un error.";
+        mount.innerHTML = `
+          <div class="card" style="margin-top:10px;">
+            <div class="hint" style="font-weight:700;">⚠️ Error</div>
+            <div class="hint muted" style="margin-top:6px;">${esc(msg)}</div>
+            <div class="btns" style="margin-top:10px;">
+              <button class="primary" id="btnRetryBase">Reintentar</button>
+            </div>
+          </div>
+        `;
+        $("btnRetryBase")?.addEventListener("click", async () => {
+          // Reintenta cargar desde la base
+          const statusEl = $("dbStatus");
+          const setStatus = (m, cls = "muted") => {
+            if (!statusEl) return;
+            statusEl.textContent = m || "";
+            statusEl.className = "hint " + cls;
+          };
+          await reloadPlayersUI(setStatus);
+          render();
+        });
+        return;
+      }
+
+      mount.innerHTML = `
+        <div class="card" style="margin-top:10px;">
+          <div class="hint muted">Inicia sesión para usar la Base.</div>
+        </div>
+      `;
       return;
     }
 
+    // 2) Estado: loading
+    if (Store.status === "loading") {
+      mount.innerHTML = `
+        <div class="card" style="margin-top:10px;">
+          <div class="hint muted">Cargando jugadores…</div>
+        </div>
+      `;
+      return;
+    }
+
+    // 3) Estado: error (aunque Store.ready sea true o false, priorizamos mostrarlo)
+    if (Store.status === "error") {
+      const msg = Store.error?.message || "Ocurrió un error.";
+      mount.innerHTML = `
+        <div class="card" style="margin-top:10px;">
+          <div class="hint" style="font-weight:700;">⚠️ Error</div>
+          <div class="hint muted" style="margin-top:6px;">${esc(msg)}</div>
+          <div class="btns" style="margin-top:10px;">
+            <button class="primary" id="btnRetryBase">Reintentar</button>
+          </div>
+        </div>
+      `;
+      $("btnRetryBase")?.addEventListener("click", async () => {
+        const statusEl = $("dbStatus");
+        const setStatus = (m, cls = "muted") => {
+          if (!statusEl) return;
+          statusEl.textContent = m || "";
+          statusEl.className = "hint " + cls;
+        };
+        await reloadPlayersUI(setStatus);
+        render();
+      });
+      return;
+    }
+
+    // 4) Estado: ready (UI normal)
     const poolSet = getPoolSet();
     const selectedIds = new Set(poolSet);
 
@@ -124,9 +237,9 @@ import {
           </div>
 
           <div class="btns">
-            <button class="ghost" id="btnSelectAll">Seleccionar todos</button>
-            <button class="ghost" id="btnSelectFill">Completar faltantes</button>
-            <button class="ghost" id="btnDeselectAll">Deseleccionar</button>
+            <button class="ghost" id="btnSelectAll" type="button">Seleccionar todos</button>
+            <button class="ghost" id="btnSelectFill" type="button">Completar faltantes</button>
+            <button class="ghost" id="btnDeselectAll" type="button">Deseleccionar</button>
           </div>
         </div>
       </div>
@@ -154,9 +267,9 @@ import {
           </div>
 
           <div class="btns">
-            <button class="primary" id="btnAdd">Agregar</button>
-            <button class="ghost" id="btnReload">Recargar</button>
-            <button class="ghost" id="btnDeleteAll">Borrar todos</button>
+            <button class="primary" id="btnAdd" type="button">Agregar</button>
+            <button class="ghost" id="btnReload" type="button">Recargar</button>
+            <button class="ghost" id="btnDeleteAll" type="button">Borrar todos</button>
           </div>
         </div>
 
@@ -170,7 +283,7 @@ import {
     `;
 
     const statusEl = $("dbStatus");
-    const setStatus = (msg, cls="muted") => {
+    const setStatus = (msg, cls = "muted") => {
       if (!statusEl) return;
       statusEl.textContent = msg || "";
       statusEl.className = "hint " + cls;
@@ -179,6 +292,7 @@ import {
     const selHint = $("selHint");
     const refreshHint = () => {
       if (selHint) selHint.textContent = poolHintText(selectedIds);
+      updateChrome();
     };
 
     // --- List rendering ---
@@ -188,14 +302,16 @@ import {
     function drawList(filterText = "") {
       const q = filterText.trim().toLowerCase();
       const list = q
-        ? allPlayers.filter(p => String(p.name||"").toLowerCase().includes(q))
+        ? allPlayers.filter((p) => String(p.name || "").toLowerCase().includes(q))
         : allPlayers;
 
       if (!playersList) return;
 
-      playersList.innerHTML = list.length ? list.map(p => {
-        const checked = selectedIds.has(p.id);
-        return `
+      playersList.innerHTML = list.length
+        ? list
+            .map((p) => {
+              const checked = selectedIds.has(p.id);
+              return `
           <div class="card" style="background: rgba(0,0,0,.12); padding:12px;">
             <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">
               <label style="display:flex; gap:10px; align-items:center; cursor:pointer;">
@@ -205,8 +321,8 @@ import {
               </label>
 
               <div class="btns">
-                <button class="ghost" data-edit="${esc(p.id)}">Editar</button>
-                <button class="ghost" data-del="${esc(p.id)}">Borrar</button>
+                <button class="ghost" type="button" data-edit="${esc(p.id)}">Editar</button>
+                <button class="ghost" type="button" data-del="${esc(p.id)}">Borrar</button>
               </div>
             </div>
 
@@ -219,8 +335,8 @@ import {
                 <div>
                   <label>Lado</label>
                   <select data-edit-side="${esc(p.id)}">
-                    <option value="D" ${p.side==="D"?"selected":""}>Derecha (D)</option>
-                    <option value="R" ${p.side==="R"?"selected":""}>Revés (R)</option>
+                    <option value="D" ${p.side === "D" ? "selected" : ""}>Derecha (D)</option>
+                    <option value="R" ${p.side === "R" ? "selected" : ""}>Revés (R)</option>
                   </select>
                 </div>
                 <div>
@@ -229,17 +345,19 @@ import {
                 </div>
 
                 <div class="btns">
-                  <button class="primary" data-save="${esc(p.id)}">Guardar</button>
-                  <button class="ghost" data-cancel="${esc(p.id)}">Cancelar</button>
+                  <button class="primary" type="button" data-save="${esc(p.id)}">Guardar</button>
+                  <button class="ghost" type="button" data-cancel="${esc(p.id)}">Cancelar</button>
                 </div>
               </div>
             </div>
           </div>
         `;
-      }).join("") : `<div class="hint muted">No hay jugadores.</div>`;
+            })
+            .join("")
+        : `<div class="hint muted">No hay jugadores.</div>`;
 
       // Selection handlers
-      playersList.querySelectorAll("[data-sel]").forEach(cb => {
+      playersList.querySelectorAll("[data-sel]").forEach((cb) => {
         cb.addEventListener("change", () => {
           const id = cb.getAttribute("data-sel");
           if (!id) return;
@@ -247,15 +365,13 @@ import {
           if (cb.checked) selectedIds.add(id);
           else selectedIds.delete(id);
 
-          // sincroniza pool
           setPoolFromSelection(selectedIds);
-
           refreshHint();
         });
       });
 
       // Edit toggle
-      playersList.querySelectorAll("[data-edit]").forEach(btn => {
+      playersList.querySelectorAll("[data-edit]").forEach((btn) => {
         btn.addEventListener("click", () => {
           const id = btn.getAttribute("data-edit");
           const box = $("edit_" + id);
@@ -264,7 +380,7 @@ import {
       });
 
       // Cancel edit
-      playersList.querySelectorAll("[data-cancel]").forEach(btn => {
+      playersList.querySelectorAll("[data-cancel]").forEach((btn) => {
         btn.addEventListener("click", () => {
           const id = btn.getAttribute("data-cancel");
           const box = $("edit_" + id);
@@ -273,7 +389,7 @@ import {
       });
 
       // Save edit
-      playersList.querySelectorAll("[data-save]").forEach(btn => {
+      playersList.querySelectorAll("[data-save]").forEach((btn) => {
         btn.addEventListener("click", async () => {
           const id = btn.getAttribute("data-save");
           try {
@@ -296,12 +412,15 @@ import {
 
             // mantener selección: eliminar ids que ya no existan
             const newSet = new Set(selectedIds);
-            const exists = new Set((Store.players||[]).map(p=>p.id));
+            const exists = new Set((Store.players || []).map((p) => p.id));
             for (const x of newSet) if (!exists.has(x)) newSet.delete(x);
-            selectedIds.clear(); for (const x of newSet) selectedIds.add(x);
-            setPoolFromSelection(selectedIds);
 
+            selectedIds.clear();
+            for (const x of newSet) selectedIds.add(x);
+
+            setPoolFromSelection(selectedIds);
             refreshHint();
+
             setStatus("✅ Guardado.", "ok");
           } catch (e) {
             console.error(e);
@@ -311,7 +430,7 @@ import {
       });
 
       // Delete one
-      playersList.querySelectorAll("[data-del]").forEach(btn => {
+      playersList.querySelectorAll("[data-del]").forEach((btn) => {
         btn.addEventListener("click", async () => {
           const id = btn.getAttribute("data-del");
           if (!id) return;
@@ -320,10 +439,13 @@ import {
           try {
             setStatus("Borrando…", "muted");
             await deletePlayer(id);
+
             selectedIds.delete(id);
             setPoolFromSelection(selectedIds);
+
             await reloadPlayersUI(setStatus);
             refreshHint();
+
             setStatus("✅ Borrado.", "ok");
           } catch (e) {
             console.error(e);
@@ -359,6 +481,8 @@ import {
 
         await reloadPlayersUI(setStatus);
         drawList($("searchPlayers")?.value || "");
+        refreshHint();
+
         setStatus("✅ Jugador agregado.", "ok");
       } catch (e) {
         console.error(e);
@@ -377,14 +501,18 @@ import {
     $("btnDeleteAll")?.addEventListener("click", async () => {
       const msg = "Esto borrará TODOS los jugadores de la base. ¿Seguro?";
       if (!confirm(msg)) return;
+
       try {
         setStatus("Borrando todos…", "muted");
         await deleteAllPlayers();
+
         selectedIds.clear();
         setPoolFromSelection(selectedIds);
+
         await reloadPlayersUI(setStatus);
         drawList("");
         refreshHint();
+
         setStatus("✅ Base reseteada.", "ok");
       } catch (e) {
         console.error(e);
@@ -395,7 +523,7 @@ import {
     // --- Select all / deselect all / fill ---
     $("btnSelectAll")?.addEventListener("click", () => {
       selectedIds.clear();
-      (Store.players || []).forEach(p => selectedIds.add(p.id));
+      (Store.players || []).forEach((p) => selectedIds.add(p.id));
       setPoolFromSelection(selectedIds);
       refreshHint();
       drawList($("searchPlayers")?.value || "");
@@ -418,7 +546,7 @@ import {
     });
 
     // Inicial: status / hint
-    setStatus("✅ db.js cargado", "muted");
+    setStatus("✅ Base lista.", "muted");
     refreshHint();
   }
 
@@ -430,7 +558,20 @@ import {
     if (view === "base") render();
   };
 
+  // Eventos (mantengo los tuyos, y agrego el nuevo global)
   window.addEventListener("op:storeReady", render);
   window.addEventListener("op:playersChanged", render);
-  document.addEventListener("DOMContentLoaded", render);
+  window.addEventListener("op:stateChanged", updateChrome);
+  window.addEventListener("op:storeChanged", () => {
+    updateChrome();
+    // Solo re-render completo si estamos en la vista base
+    // (evita repintar “en background” otras pestañas)
+    const baseVisible = $("viewBase") && $("viewBase").style.display !== "none";
+    if (baseVisible) render();
+  });
+
+  document.addEventListener("DOMContentLoaded", () => {
+    updateChrome();
+    render();
+  });
 })();
