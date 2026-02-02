@@ -1,5 +1,6 @@
 // db.js — Base de jugadores (UI + CRUD Supabase + selección para pool)
 // ✅ Lista ordenada alfabéticamente siempre
+// ✅ Fix UX: al seleccionar checkbox se quita el foco (blur) para evitar "fondo más claro" moviéndose por :focus-within
 
 import { Store } from "./store.js";
 import {
@@ -189,7 +190,7 @@ import {
       const sorted = sortPlayersByName(Store.players || []);
 
       const list = q
-        ? sorted.filter(p => String(p.name||"").toLowerCase().includes(q))
+        ? sorted.filter(p => String(p.name || "").toLowerCase().includes(q))
         : sorted;
 
       if (!playersList) return;
@@ -239,6 +240,7 @@ import {
         `;
       }).join("") : `<div class="hint muted">No hay jugadores.</div>`;
 
+      // ✅ FIX: al seleccionar, quitar foco para que no active estilos :focus-within del CSS
       playersList.querySelectorAll("[data-sel]").forEach(cb => {
         cb.addEventListener("change", () => {
           const id = cb.getAttribute("data-sel");
@@ -249,7 +251,14 @@ import {
 
           setPoolFromSelection(selectedIds);
           refreshHint();
+
+          // quita foco (evita “parche claro” moviéndose)
+          cb.blur();
         });
+
+        // extra: si el click deja foco, lo quitamos igual
+        cb.addEventListener("click", () => cb.blur());
+        cb.addEventListener("mouseup", () => cb.blur());
       });
 
       playersList.querySelectorAll("[data-edit]").forEach(btn => {
@@ -290,7 +299,7 @@ import {
             await reloadPlayersUI(setStatus);
 
             const newSet = new Set(selectedIds);
-            const exists = new Set((Store.players||[]).map(p=>p.id));
+            const exists = new Set((Store.players || []).map(p => p.id));
             for (const x of newSet) if (!exists.has(x)) newSet.delete(x);
             selectedIds.clear(); for (const x of newSet) selectedIds.add(x);
             setPoolFromSelection(selectedIds);
