@@ -1,4 +1,5 @@
-// turns.js — Generar turnos + ingresar marcadores + guardar + PDFs (fixture/resultados)
+// turns.js — Generar turnos + ingresar marcadores + guardar + PDFs
+// ✅ Botón "Limpiar turnos" para borrar lo de la sesión anterior
 
 import { Store } from "./store.js";
 import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
@@ -178,17 +179,15 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
   }
 
   function drawTeamsAll(doc, session, pageW, pageH, margin, startY) {
-    // Dibuja equipos completos, con salto de página si hace falta.
     const A = session?.team_a || [];
     const B = session?.team_b || [];
 
     const maxW = pageW - margin*2;
-    const boxH = 14 + (Math.max(A.length, B.length) * 5.2) + 10; // auto altura
+    const boxH = 14 + (Math.max(A.length, B.length) * 5.2) + 10;
     const minH = 46;
-    let h = Math.max(minH, Math.min(boxH, 150)); // límite para no tapar todo
+    let h = Math.max(minH, Math.min(boxH, 150));
     let y = startY;
 
-    // si no entra, nueva página
     if (y + h > pageH - 18) {
       doc.addPage();
       y = 14;
@@ -205,7 +204,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
 
-    // Encabezados
     doc.setFont("helvetica", "bold");
     doc.text(`Equipo A (${A.length})`, margin + 3, y + 14);
     doc.text(`Equipo B (${B.length})`, margin + (maxW/2) + 3, y + 14);
@@ -216,7 +214,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     const maxRowsPerPage = Math.floor((h - 20) / 5.2);
     const rowsToShow = Math.max(A.length, B.length);
 
-    // Si no caben todos, hacemos “continuación” en otra página
     let offset = 0;
     let firstBlock = true;
 
@@ -249,7 +246,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       firstBlock = false;
     }
 
-    return startY + h + 6; // retorna Y para seguir
+    return startY + h + 6;
   }
 
   function makePdf({ mode, session, turns, summary, dateISO }) {
@@ -270,11 +267,9 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     doc.text(`Fecha: ${pdfNiceDate(date)}`, margin, 20);
     doc.text(mode === "results" ? "Tipo: Resultados" : "Tipo: Fixture", margin, 25);
 
-    // Equipos (completos)
     let y = 30;
     y = drawTeamsAll(doc, session, pageW, pageH, margin, y);
 
-    // Turnos
     const maxW = pageW - margin*2;
 
     doc.setDrawColor(40);
@@ -334,7 +329,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       y += 4;
     }
 
-    // Resumen global (solo resultados)
     if (mode === "results") {
       if (y > pageH - 45) { doc.addPage(); y = 14; }
 
@@ -368,7 +362,14 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     doc.save(filename);
   }
 
-  // ---------------- UI ----------------
+  function clearTurnsState() {
+    Store.setState({
+      courts: 0,
+      turns: [],
+      summary: null
+    });
+  }
+
   function render() {
     const mount = $("turnsMount");
     if (!mount) return;
@@ -399,6 +400,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
             </div>
 
             <div class="btns">
+              <button class="ghost" id="btnClearTurns" type="button" ${turnsState.length ? "" : "disabled"}>Limpiar turnos</button>
               <button class="ghost" id="btnGenTurns" type="button">Generar turnos</button>
               <button class="ghost" id="btnPdfFixture" type="button" ${turnsState.length ? "" : "disabled"}>PDF (fixture)</button>
               <button class="ghost" id="btnPdfResults" type="button" ${allScoresComplete(turnsState) ? "" : "disabled"}>PDF (resultados)</button>
@@ -565,6 +567,12 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
     drawTurnsUI();
 
+    $("btnClearTurns")?.addEventListener("click", () => {
+      clearTurnsState();
+      setStatus("Listo. Turnos limpiados.", "muted");
+      render();
+    });
+
     $("btnGenTurns")?.addEventListener("click", async () => {
       try {
         setStatus("Generando turnos…", "muted");
@@ -618,7 +626,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         };
 
         await saveResultsToHistory(dateISO, turnsPayload, scoresPayload, summaryPayload);
-
         setStatus("✅ Resultados guardados. Ve a Historial.", "ok");
       } catch (e) {
         console.error(e);
@@ -626,7 +633,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       }
     });
 
-    // PDF fixture
     $("btnPdfFixture")?.addEventListener("click", async () => {
       try {
         const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
@@ -642,7 +648,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       }
     });
 
-    // PDF resultados
     $("btnPdfResults")?.addEventListener("click", async () => {
       try {
         const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
