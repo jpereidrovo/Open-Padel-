@@ -1,4 +1,6 @@
 // teams.js — Equipos (pool -> A/B) + mover manualmente + guardar a historial (sessions)
+// ✅ Fondo estable (sin “cambios de color” por rgba anidado)
+// ✅ Autoarmar ahora random en cada click (mantiene reglas)
 
 import { Store } from "./store.js";
 import { saveTeamsToHistory } from "./supabaseApi.js";
@@ -35,77 +37,14 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
     return (Store.players || []).filter(p => poolIds.has(p.id));
   }
 
-  function splitBySide(list) {
-    const D = list.filter(p => p.side === "D").sort((a,b)=>Number(b.rating)-Number(a.rating));
-    const R = list.filter(p => p.side === "R").sort((a,b)=>Number(b.rating)-Number(a.rating));
-    return { D, R };
-  }
-
-  // Balance simple: reparte alternando (top-down) por lado para promedios parecidos
-  function autoBalanceTeams(poolPlayers) {
-    const { D, R } = splitBySide(poolPlayers);
-
-    // Requisito: igual cantidad D y R y múltiplo de 4
-    if (poolPlayers.length % 4 !== 0) {
-      throw new Error("El pool debe ser múltiplo de 4.");
-    }
-    if (D.length !== R.length) {
-      throw new Error("El pool debe tener igual cantidad de Derecha (D) y Revés (R).");
-    }
-
-    const A = [];
-    const B = [];
-
-    // Reparte revés: uno para A, uno para B, y así…
-    for (let i = 0; i < R.length; i++) {
-      (i % 2 === 0 ? A : B).push(R[i]);
-    }
-    // Reparte derecha similar (cruzado para compensar)
-    for (let i = 0; i < D.length; i++) {
-      (i % 2 === 0 ? B : A).push(D[i]);
-    }
-
-    // Ajuste rápido para promedios
-    let tries = 0;
-    while (tries < 20) {
-      tries++;
-      const diff = avgRating(A) - avgRating(B);
-      if (Math.abs(diff) <= 0.15) break;
-
-      const src = diff > 0 ? A : B;
-      const dst = diff > 0 ? B : A;
-
-      const srcD = src.filter(p => p.side === "D");
-      const dstD = dst.filter(p => p.side === "D");
-      const srcR = src.filter(p => p.side === "R");
-      const dstR = dst.filter(p => p.side === "R");
-
-      const swapSide = (srcD.length && dstD.length) ? "D" : ((srcR.length && dstR.length) ? "R" : null);
-      if (!swapSide) break;
-
-      const sList = src.filter(p => p.side === swapSide).sort((a,b)=>Number(a.rating)-Number(a.rating));
-      const dList = dst.filter(p => p.side === swapSide).sort((a,b)=>Number(a.rating)-Number(a.rating));
-
-      const s = sList[Math.floor(sList.length/2)];
-      const d = dList[Math.floor(dList.length/2)];
-      if (!s || !d) break;
-
-      const si = src.findIndex(p => p.id === s.id);
-      const di = dst.findIndex(p => p.id === d.id);
-      src[si] = d;
-      dst[di] = s;
-    }
-
-    return { teamA: A, teamB: B };
-  }
-
   function uniqById(list) {
     const out = [];
     const seen = new Set();
     for (const p of (list || [])) {
       if (!p || !p.id) continue;
-      if (seen.has(p.id)) continue;
-      seen.add(p.id);
+      const id = String(p.id);
+      if (seen.has(id)) continue;
+      seen.add(id);
       out.push(p);
     }
     return out;
@@ -124,8 +63,102 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
     return poolPlayers.filter(p => !used.has(String(p.id)));
   }
 
+  function splitBySide(list) {
+    const D = list.filter(p => p.side === "D").sort((a,b)=>Number(b.rating)-Number(a.rating));
+    const R = list.filter(p => p.side === "R").sort((a,b)=>Number(b.rating)-Number(a.rating));
+    return { D, R };
+  }
+
+  // Shuffle “suave” para que cada click sea distinto pero mantenga balance por rating
+  function softRandomizeByPairs(sortedList) {
+    const a = sortedList.slice();
+    for (let i = 0; i < a.length - 1; i += 2) {
+      if (Math.random() < 0.5) {
+        [a[i], a[i+1]] = [a[i+1], a[i]];
+      }
+    }
+    // además, un par de swaps aleatorios locales
+    for (let k = 0; k < 3; k++) {
+      const i = Math.floor(Math.random() * Math.max(1, a.length - 1));
+      const j = Math.min(a.length - 1, i + 1);
+      if (a[i] && a[j] && Math.random() < 0.35) {
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+    }
+    return a;
+  }
+
+  // Autoarmar: random controlado + ajuste para promedios
+  function autoBalanceTeams(poolPlayers) {
+    const { D: D0, R: R0 } = splitBySide(poolPlayers);
+
+    if (poolPlayers.length % 4 !== 0) {
+      throw new Error("El pool debe ser múltiplo de 4.");
+    }
+    if (D0.length !== R0.length) {
+      throw new Error("El pool debe tener igual cantidad de Derecha (D) y Revés (R).");
+    }
+
+    // ✅ aquí la diferencia: random suave cada click
+    const D = softRandomizeByPairs(D0);
+    const R = softRandomizeByPairs(R0);
+
+    const A = [];
+    const B = [];
+
+    // Reparte revés alternando
+    for (let i = 0; i < R.length; i++) {
+      (i % 2 === 0 ? A : B).push(R[i]);
+    }
+    // Reparte derecha cruzado para compensar
+    for (let i = 0; i < D.length; i++) {
+      (i % 2 === 0 ? B : A).push(D[i]);
+    }
+
+    // Ajuste para acercar promedios (swap del mismo lado)
+    let tries = 0;
+    while (tries < 30) {
+      tries++;
+      const diff = avgRating(A) - avgRating(B);
+      if (Math.abs(diff) <= 0.15) break;
+
+      const src = diff > 0 ? A : B;
+      const dst = diff > 0 ? B : A;
+
+      const pickSide = () => {
+        const canD = src.some(p => p.side === "D") && dst.some(p => p.side === "D");
+        const canR = src.some(p => p.side === "R") && dst.some(p => p.side === "R");
+        if (canD && canR) return Math.random() < 0.5 ? "D" : "R";
+        if (canD) return "D";
+        if (canR) return "R";
+        return null;
+      };
+
+      const side = pickSide();
+      if (!side) break;
+
+      const sList = src.filter(p => p.side === side).sort((a,b)=>Number(a.rating)-Number(b.rating));
+      const dList = dst.filter(p => p.side === side).sort((a,b)=>Number(a.rating)-Number(b.rating));
+
+      // swap de medianos (estable) o aleatorio (para variar)
+      const siPick = Math.random() < 0.6 ? Math.floor(sList.length/2) : Math.floor(Math.random()*sList.length);
+      const diPick = Math.random() < 0.6 ? Math.floor(dList.length/2) : Math.floor(Math.random()*dList.length);
+
+      const s = sList[siPick];
+      const d = dList[diPick];
+      if (!s || !d) break;
+
+      const si = src.findIndex(p => p.id === s.id);
+      const di = dst.findIndex(p => p.id === d.id);
+      src[si] = d;
+      dst[di] = s;
+    }
+
+    return { teamA: A, teamB: B };
+  }
+
   function renderWarning(teamA, teamB, poolPlayers) {
-    const total = (teamA.length + teamB.length);
+    const total = teamA.length + teamB.length;
     const okMultiple = total % 4 === 0 && total > 0;
 
     const aD = countSide(teamA, "D"), aR = countSide(teamA, "R");
@@ -161,12 +194,6 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
     const teamA = uniqById(Array.isArray(Store.state?.team_a) ? Store.state.team_a : []);
     const teamB = uniqById(Array.isArray(Store.state?.team_b) ? Store.state.team_b : []);
 
-    // normaliza en store (por si venía duplicado)
-    if (teamA.length !== (Store.state?.team_a||[]).length || teamB.length !== (Store.state?.team_b||[]).length) {
-      Store.setState({ team_a: teamA, team_b: teamB });
-      // no return: seguimos dibujando
-    }
-
     const unassigned = computeUnassigned(poolPlayers, teamA, teamB);
 
     const aAvg = avgRating(teamA).toFixed(2);
@@ -174,6 +201,14 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
 
     const aD = countSide(teamA, "D"), aR = countSide(teamA, "R");
     const bD = countSide(teamB, "D"), bR = countSide(teamB, "R");
+
+    // ✅ estilos inline para evitar “fondo cambiante” por rgba anidado
+    const panelStyle = `
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.06);
+      border-radius: 14px;
+      padding: 12px;
+    `;
 
     mount.innerHTML = `
       <div class="card" style="margin-top:10px;">
@@ -187,7 +222,7 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
           </div>
 
           <div class="btns">
-            <button class="ghost" id="btnAutoTeams" type="button">Autoarmar</button>
+            <button class="ghost" id="btnAutoTeams" type="button">Autoarmar (random)</button>
             <button class="ghost" id="btnClearTeams" type="button">Limpiar equipos</button>
             <button class="primary" id="btnSaveTeams" type="button">Guardar equipos</button>
           </div>
@@ -201,7 +236,7 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
         <div class="hint muted">Seleccionados en Base. Aquí puedes asignarlos a A/B manualmente.</div>
 
         <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; margin-top:10px;">
-          <div class="card" style="background: rgba(0,0,0,.12);">
+          <div style="${panelStyle}">
             <h4 style="margin:0 0 10px;">Sin asignar (${unassigned.length})</h4>
             <div style="display:grid; gap:8px;">
               ${unassigned.length ? unassigned.map(p => `
@@ -216,7 +251,7 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
             </div>
           </div>
 
-          <div class="card" style="background: rgba(0,0,0,.12);">
+          <div style="${panelStyle}">
             <h4 style="margin:0 0 10px;">Equipo A (${teamA.length})</h4>
             <div class="hint muted">Promedio: <b>${esc(aAvg)}</b> • D:${esc(aD)} R:${esc(aR)}</div>
             <div style="display:grid; gap:8px; margin-top:10px;">
@@ -232,7 +267,7 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
             </div>
           </div>
 
-          <div class="card" style="background: rgba(0,0,0,.12);">
+          <div style="${panelStyle}">
             <h4 style="margin:0 0 10px;">Equipo B (${teamB.length})</h4>
             <div class="hint muted">Promedio: <b>${esc(bAvg)}</b> • D:${esc(bD)} R:${esc(bR)}</div>
             <div style="display:grid; gap:8px; margin-top:10px;">
@@ -258,40 +293,33 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       statusEl.className = "hint " + cls;
     };
 
-    // fecha editable
     $("teamsDate")?.addEventListener("change", (e) => {
-      const v = e.target.value;
-      Store.setState({ session_date: v });
+      Store.setState({ session_date: e.target.value });
     });
 
-    // helpers de update
     function commitTeams(nextA, nextB) {
       Store.setState({ team_a: uniqById(nextA), team_b: uniqById(nextB) });
       render();
     }
 
-    // Autoarmar
     $("btnAutoTeams")?.addEventListener("click", () => {
       try {
         const pool = getPoolPlayers();
-        const { teamA, teamB } = autoBalanceTeams(pool);
-
-        Store.setState({ team_a: teamA, team_b: teamB });
-        setStatus("✅ Equipos autoarmados.", "ok");
+        const { teamA: A, teamB: B } = autoBalanceTeams(pool);
+        Store.setState({ team_a: A, team_b: B });
+        setStatus("✅ Equipos autoarmados (random).", "ok");
         render();
       } catch (e) {
         setStatus(`❌ ${e?.message || e}`, "error");
       }
     });
 
-    // Limpiar equipos
     $("btnClearTeams")?.addEventListener("click", () => {
       Store.setState({ team_a: [], team_b: [] });
       setStatus("Listo. Equipos limpiados.", "muted");
       render();
     });
 
-    // Asignar desde “Sin asignar”
     mount.querySelectorAll("[data-add-a]").forEach(btn => {
       btn.addEventListener("click", () => {
         const id = btn.getAttribute("data-add-a");
@@ -312,7 +340,6 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       });
     });
 
-    // Mover A → B
     mount.querySelectorAll("[data-move-a-b]").forEach(btn => {
       btn.addEventListener("click", () => {
         const id = btn.getAttribute("data-move-a-b");
@@ -323,7 +350,6 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       });
     });
 
-    // Mover B → A
     mount.querySelectorAll("[data-move-b-a]").forEach(btn => {
       btn.addEventListener("click", () => {
         const id = btn.getAttribute("data-move-b-a");
@@ -334,7 +360,6 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       });
     });
 
-    // Quitar de A / B (vuelve a “Sin asignar”)
     mount.querySelectorAll("[data-rem-a]").forEach(btn => {
       btn.addEventListener("click", () => {
         const id = btn.getAttribute("data-rem-a");
@@ -351,7 +376,6 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
       });
     });
 
-    // Guardar equipos -> sessions
     $("btnSaveTeams")?.addEventListener("click", async () => {
       try {
         const date = $("teamsDate")?.value || Store.state?.session_date || todayISO();
@@ -365,7 +389,6 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
         await saveTeamsToHistory(date, A.length + B.length, A, B);
 
         setStatus("✅ Equipos guardados. Ve a Historial y recarga.", "ok");
-
         window.OP = window.OP || {};
         window.OP.refresh?.("history");
       } catch (e) {
@@ -375,7 +398,6 @@ import { saveTeamsToHistory } from "./supabaseApi.js";
     });
   }
 
-  // Integración con navegación
   window.OP = window.OP || {};
   const prev = window.OP.refresh;
   window.OP.refresh = (view) => {
