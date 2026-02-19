@@ -1,5 +1,7 @@
 // turns.js — Generar turnos + ingresar marcadores (fluido) + guardar a historial (results)
-// ✅ Auditoría: detecta parejas repetidas y rivales repetidos automáticamente.
+// ✅ Auto-reintentos: busca calendario sin repetir parejas cuando sea posible.
+// ✅ Si NO es posible, elige el mejor (minimiza parejas repetidas y rivales repetidos) y lo reporta.
+// ✅ Auditoría: lista automáticamente qué se repite (parejas y rivales).
 
 import { Store } from "./store.js";
 import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
@@ -94,86 +96,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
   }
 
   // ============================================================
-  // Generador (el tuyo actual, sin tocar más)
-  // ============================================================
-
-  function shuffleCopy(arr) {
-    const a = arr.slice();
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
-  }
-
-  function buildPairs(teamPlayers) {
-    const D = teamPlayers.filter(p => p.side === "D").sort((a,b)=>Number(b.rating)-Number(a.rating));
-    const R = teamPlayers.filter(p => p.side === "R").sort((a,b)=>Number(b.rating)-Number(a.rating));
-    const pairs = [];
-    const n = Math.min(D.length, R.length);
-    for (let i = 0; i < n; i++) pairs.push([D[i], R[i]]);
-    return pairs;
-  }
-
-  function generateTurns(teamA, teamB, numTurns) {
-    const courts = Math.min(buildPairs(teamA).length, buildPairs(teamB).length);
-    if (courts <= 0) throw new Error("Equipos incompletos para armar parejas.");
-
-    const usedA = new Set();
-    const usedB = new Set();
-    const pairKey = (p) => [p[0].id, p[1].id].sort().join("-");
-
-    const turns = [];
-
-    for (let t = 1; t <= numTurns; t++) {
-      let best = null;
-
-      for (let attempt = 0; attempt < 60; attempt++) {
-        const AD = shuffleCopy(teamA.filter(p => p.side === "D"));
-        const AR = shuffleCopy(teamA.filter(p => p.side === "R"));
-        const BD = shuffleCopy(teamB.filter(p => p.side === "D"));
-        const BR = shuffleCopy(teamB.filter(p => p.side === "R"));
-
-        const nA = Math.min(AD.length, AR.length);
-        const nB = Math.min(BD.length, BR.length);
-
-        const Ause = [];
-        const Buse = [];
-
-        for (let i = 0; i < nA && Ause.length < courts; i++) Ause.push([AD[i], AR[i]]);
-        for (let i = 0; i < nB && Buse.length < courts; i++) Buse.push([BD[i], BR[i]]);
-
-        let newCount = 0;
-        for (const p of Ause) if (!usedA.has(pairKey(p))) newCount++;
-        for (const p of Buse) if (!usedB.has(pairKey(p))) newCount++;
-
-        if (!best || newCount > best.newCount) {
-          best = { Ause, Buse, newCount };
-          if (newCount === courts * 2) break;
-        }
-      }
-
-      for (const p of best.Ause) usedA.add(pairKey(p));
-      for (const p of best.Buse) usedB.add(pairKey(p));
-
-      const matches = [];
-      for (let i = 0; i < courts; i++) {
-        matches.push({
-          court: i + 1,
-          top: { team: "A", pair: best.Ause[i] },
-          bottom: { team: "B", pair: best.Buse[i] },
-          scoreRaw: ""
-        });
-      }
-
-      turns.push({ turnIndex: t, matches });
-    }
-
-    return { courts, turns };
-  }
-
-  // ============================================================
-  // ✅ AUDITORÍA (parejas y rivales)
+  // ✅ Auditoría (parejas y rivales)
   // ============================================================
 
   function pName(p) {
@@ -224,7 +147,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         oppNames.set(bIds[0], pName(bPair?.[0]));
         oppNames.set(bIds[1], pName(bPair?.[1]));
 
-        // Cada jugador A enfrenta a 2 jugadores B en ese partido
         for (const ai of aIds) for (const bi of bIds) {
           const ok = oppKey(ai, bi);
           if (!oppOcc.has(ok)) {
@@ -232,7 +154,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
           }
           const obj = oppOcc.get(ok);
           obj.count += 1;
-          if (obj.samples.length < 5) obj.samples.push({ turn: t.turnIndex, court: m.court });
+          if (obj.samples.length < 6) obj.samples.push({ turn: t.turnIndex, court: m.court });
         }
       }
     }
@@ -269,12 +191,23 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     const okPairs = repeatedPairsA.length === 0 && repeatedPairsB.length === 0;
     const okOpp = repeatedOpponents.length === 0;
 
+    // Métricas simples para “qué tan malo”
+    const pairRepeatCount =
+      repeatedPairsA.reduce((a,it)=>a + (it.count - 1), 0) +
+      repeatedPairsB.reduce((a,it)=>a + (it.count - 1), 0);
+
+    const oppRepeatCount = repeatedOpponents.reduce((a,it)=>a + (it.count - 1), 0);
+    const oppMax = repeatedOpponents.length ? Math.max(...repeatedOpponents.map(x=>x.count)) : 1;
+
     return {
       okPairs,
       okOpp,
       repeatedPairsA,
       repeatedPairsB,
-      repeatedOpponents
+      repeatedOpponents,
+      pairRepeatCount,
+      oppRepeatCount,
+      oppMax
     };
   }
 
@@ -290,7 +223,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
     const listPairs = (items) => {
       if (!items.length) return `<div class="hint muted">Sin repeticiones.</div>`;
-      return items.slice(0, 20).map(it => {
+      return items.slice(0, 30).map(it => {
         const label = it.occ?.[0]?.pretty || it.key;
         const where = it.occ.map(o => `T${o.turn}-C${o.court}`).join(", ");
         return `<div class="hint muted">• <b>${esc(label)}</b> — ${esc(it.count)} veces (${esc(where)})</div>`;
@@ -299,7 +232,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
     const listOpp = (items) => {
       if (!items.length) return `<div class="hint muted">Sin rivales repetidos.</div>`;
-      return items.slice(0, 25).map(it => {
+      return items.slice(0, 40).map(it => {
         const where = (it.samples || []).map(s => `T${s.turn}-C${s.court}`).join(", ");
         return `<div class="hint muted">• <b>${esc(it.aName)}</b> vs <b>${esc(it.bName)}</b> — ${esc(it.count)} veces (${esc(where)})</div>`;
       }).join("");
@@ -316,6 +249,12 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
           ${badge(audit.okOpp)}
         </div>
 
+        <div class="hint muted" style="margin-top:8px;">
+          Métricas: <b>${esc(audit.pairRepeatCount)}</b> repeticiones de parejas •
+          <b>${esc(audit.oppRepeatCount)}</b> repeticiones de rivales •
+          Máximo enfrentamiento repetido: <b>${esc(audit.oppMax)}x</b>
+        </div>
+
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-top:10px;">
           <div class="card" style="background: rgba(0,0,0,.12);">
             <h4 style="margin:0 0 8px;">Parejas repetidas — Equipo A</h4>
@@ -329,13 +268,118 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
         <div class="card" style="background: rgba(0,0,0,.12); margin-top:12px;">
           <h4 style="margin:0 0 8px;">Rivales repetidos (Jugador vs Jugador)</h4>
-          <div class="hint muted">Si ves “3 veces”, significa que esos dos jugadores se enfrentaron 3 veces en todos los turnos.</div>
+          <div class="hint muted">Si ves “3 veces”, esos dos jugadores se enfrentaron 3 veces en todos los turnos.</div>
           <div style="margin-top:8px;">
             ${listOpp(audit.repeatedOpponents)}
           </div>
         </div>
       </div>
     `;
+  }
+
+  // ============================================================
+  // ✅ Generación con auto-reintentos (elige el mejor)
+  // ============================================================
+
+  function shuffleCopy(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  function splitBySide(players) {
+    return {
+      D: (players || []).filter(p => p.side === "D"),
+      R: (players || []).filter(p => p.side === "R")
+    };
+  }
+
+  // Genera un solo “candidato” (random) para todos los turnos
+  function generateCandidate(teamA, teamB, numTurns) {
+    const { D: AD0, R: AR0 } = splitBySide(teamA);
+    const { D: BD0, R: BR0 } = splitBySide(teamB);
+
+    const courts = Math.min(AD0.length, AR0.length, BD0.length, BR0.length);
+    if (courts <= 0) throw new Error("Equipos incompletos para armar parejas (faltan D o R).");
+
+    const AD = shuffleCopy(AD0).slice(0, courts);
+    const AR = shuffleCopy(AR0).slice(0, courts);
+    const BD = shuffleCopy(BD0).slice(0, courts);
+    const BR = shuffleCopy(BR0).slice(0, courts);
+
+    const turns = [];
+
+    for (let t = 1; t <= numTurns; t++) {
+      // shifts random por turno para variar parejas y cruces
+      const aShift = Math.floor(Math.random() * courts);
+      const bShift = Math.floor(Math.random() * courts);
+      const mShift = Math.floor(Math.random() * courts);
+
+      const Apairs = [];
+      const Bpairs = [];
+
+      for (let i = 0; i < courts; i++) {
+        Apairs.push([AD[i], AR[(i + aShift + t) % courts]]);
+        Bpairs.push([BD[i], BR[(i + bShift + t) % courts]]);
+      }
+
+      const matches = [];
+      for (let i = 0; i < courts; i++) {
+        const bp = Bpairs[(i + mShift) % courts];
+        matches.push({
+          court: i + 1,
+          top: { team: "A", pair: Apairs[i] },
+          bottom: { team: "B", pair: bp },
+          scoreRaw: ""
+        });
+      }
+
+      turns.push({ turnIndex: t, matches });
+    }
+
+    return { courts, turns };
+  }
+
+  // Score para elegir “mejor candidato”
+  // Prioridad: minimizar repeticiones de parejas (peso altísimo), luego minimizar rivales repetidos, luego bajar max repetición.
+  function scoreCandidate(turns) {
+    const a = auditTurns(turns);
+    const pairsPenalty = a.pairRepeatCount * 100000; // dominante
+    const oppPenalty = a.oppRepeatCount * 2000;
+    const oppMaxPenalty = Math.max(0, a.oppMax - 2) * 5000; // evita que alguien llegue a 3+ si se puede
+    return pairsPenalty + oppPenalty + oppMaxPenalty;
+  }
+
+  // Auto-reintentos: busca perfecto si existe, sino mejor posible
+  function generateTurnsSmart(teamA, teamB, numTurns, tries = 2500) {
+    let best = null;
+    let bestScore = Infinity;
+
+    for (let i = 0; i < tries; i++) {
+      const cand = generateCandidate(teamA, teamB, numTurns);
+      const s = scoreCandidate(cand.turns);
+
+      if (s < bestScore) {
+        bestScore = s;
+        best = cand;
+        if (bestScore === 0) break; // perfecto: 0 repeticiones de parejas y 0 rivales repetidos (raro, pero posible)
+      }
+    }
+
+    if (!best) throw new Error("No se pudo generar turnos. Revisa D/R y equipos.");
+
+    const audit = auditTurns(best.turns);
+    const perfectPairs = audit.okPairs;
+
+    return {
+      courts: best.courts,
+      turns: best.turns,
+      audit,
+      perfectPairs
+    };
   }
 
   // ---------- UI render ----------
@@ -422,7 +466,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       `;
       btnSave.disabled = !allScoresComplete(turnsState);
 
-      // Auditoría siempre visible (automática)
       if (auditMount) auditMount.innerHTML = renderAuditPanel(turnsState);
     }
 
@@ -539,13 +582,15 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
     $("btnGenTurns")?.addEventListener("click", async () => {
       try {
-        setStatus("Generando turnos…", "muted");
+        setStatus("Generando turnos (optimizando)…", "muted");
 
         const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
         const numTurns = Number($("turnCount")?.value || 3);
 
         const { A, B } = await ensureTeamsLoaded(dateISO);
-        const gen = generateTurns(A, B, numTurns);
+
+        // ✅ Busca el mejor calendario
+        const gen = generateTurnsSmart(A, B, numTurns, 3000);
 
         Store.setState({
           session_date: dateISO,
@@ -553,7 +598,16 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
           turns: gen.turns
         });
 
-        setStatus("✅ Turnos generados. Auditoría lista abajo.", "ok");
+        // Mensaje claro:
+        if (gen.perfectPairs) {
+          setStatus("✅ Turnos generados SIN repetir parejas. Revisa auditoría abajo.", "ok");
+        } else {
+          setStatus(
+            "⚠️ No se pudo evitar repetir parejas con estos jugadores/turnos. Generé la mejor combinación posible. Mira auditoría abajo.",
+            "error"
+          );
+        }
+
         render();
       } catch (e) {
         console.error(e);
