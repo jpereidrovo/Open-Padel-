@@ -1,6 +1,6 @@
 // turns.js — Generar turnos + ingresar marcadores (fluido) + guardar a historial (results)
-// ✅ Auto-reintentos: busca calendario sin repetir parejas cuando sea posible.
-// ✅ Si NO es posible, elige el mejor (minimiza parejas repetidas y rivales repetidos) y lo reporta.
+// ✅ Auto-reintentos: busca calendario PERFECTO (0 parejas repetidas, 0 rivales repetidos) cuando sea posible.
+// ✅ Si NO existe/NO se encuentra, deja el mejor y lo reporta.
 // ✅ Auditoría: lista automáticamente qué se repite (parejas y rivales).
 
 import { Store } from "./store.js";
@@ -191,7 +191,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     const okPairs = repeatedPairsA.length === 0 && repeatedPairsB.length === 0;
     const okOpp = repeatedOpponents.length === 0;
 
-    // Métricas simples para “qué tan malo”
     const pairRepeatCount =
       repeatedPairsA.reduce((a,it)=>a + (it.count - 1), 0) +
       repeatedPairsB.reduce((a,it)=>a + (it.count - 1), 0);
@@ -278,7 +277,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
   }
 
   // ============================================================
-  // ✅ Generación con auto-reintentos (elige el mejor)
+  // ✅ Generación con auto-reintentos (busca PERFECTO)
   // ============================================================
 
   function shuffleCopy(arr) {
@@ -297,7 +296,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     };
   }
 
-  // Genera un solo “candidato” (random) para todos los turnos
+  // genera un candidato random
   function generateCandidate(teamA, teamB, numTurns) {
     const { D: AD0, R: AR0 } = splitBySide(teamA);
     const { D: BD0, R: BR0 } = splitBySide(teamB);
@@ -313,7 +312,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     const turns = [];
 
     for (let t = 1; t <= numTurns; t++) {
-      // shifts random por turno para variar parejas y cruces
       const aShift = Math.floor(Math.random() * courts);
       const bShift = Math.floor(Math.random() * courts);
       const mShift = Math.floor(Math.random() * courts);
@@ -322,6 +320,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       const Bpairs = [];
 
       for (let i = 0; i < courts; i++) {
+        // rotación distinta por turno
         Apairs.push([AD[i], AR[(i + aShift + t) % courts]]);
         Bpairs.push([BD[i], BR[(i + bShift + t) % courts]]);
       }
@@ -343,42 +342,52 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     return { courts, turns };
   }
 
-  // Score para elegir “mejor candidato”
-  // Prioridad: minimizar repeticiones de parejas (peso altísimo), luego minimizar rivales repetidos, luego bajar max repetición.
+  // score: minimiza repeticiones (parejas súper alto, rivales alto, luego evitar max>2)
   function scoreCandidate(turns) {
     const a = auditTurns(turns);
     const pairsPenalty = a.pairRepeatCount * 100000; // dominante
     const oppPenalty = a.oppRepeatCount * 2000;
-    const oppMaxPenalty = Math.max(0, a.oppMax - 2) * 5000; // evita que alguien llegue a 3+ si se puede
+    const oppMaxPenalty = Math.max(0, a.oppMax - 2) * 5000;
     return pairsPenalty + oppPenalty + oppMaxPenalty;
   }
 
-  // Auto-reintentos: busca perfecto si existe, sino mejor posible
-  function generateTurnsSmart(teamA, teamB, numTurns, tries = 2500) {
+  // busca perfecto; si no encuentra, devuelve mejor
+  function generateTurnsSmart(teamA, teamB, numTurns, tries = 5000) {
     let best = null;
     let bestScore = Infinity;
+    let bestAudit = null;
 
     for (let i = 0; i < tries; i++) {
       const cand = generateCandidate(teamA, teamB, numTurns);
-      const s = scoreCandidate(cand.turns);
+      const a = auditTurns(cand.turns);
 
+      // ✅ perfecto = 0 parejas repetidas y 0 rivales repetidos
+      if (a.okPairs && a.okOpp) {
+        return {
+          courts: cand.courts,
+          turns: cand.turns,
+          audit: a,
+          perfect: true,
+          triesUsed: i + 1
+        };
+      }
+
+      const s = scoreCandidate(cand.turns);
       if (s < bestScore) {
         bestScore = s;
         best = cand;
-        if (bestScore === 0) break; // perfecto: 0 repeticiones de parejas y 0 rivales repetidos (raro, pero posible)
+        bestAudit = a;
       }
     }
 
     if (!best) throw new Error("No se pudo generar turnos. Revisa D/R y equipos.");
 
-    const audit = auditTurns(best.turns);
-    const perfectPairs = audit.okPairs;
-
     return {
       courts: best.courts,
       turns: best.turns,
-      audit,
-      perfectPairs
+      audit: bestAudit || auditTurns(best.turns),
+      perfect: false,
+      triesUsed: tries
     };
   }
 
@@ -582,15 +591,14 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
     $("btnGenTurns")?.addEventListener("click", async () => {
       try {
-        setStatus("Generando turnos (optimizando)…", "muted");
+        setStatus("Generando turnos (buscando perfecto)…", "muted");
 
         const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
         const numTurns = Number($("turnCount")?.value || 3);
 
         const { A, B } = await ensureTeamsLoaded(dateISO);
 
-        // ✅ Busca el mejor calendario
-        const gen = generateTurnsSmart(A, B, numTurns, 3000);
+        const gen = generateTurnsSmart(A, B, numTurns, 8000);
 
         Store.setState({
           session_date: dateISO,
@@ -598,12 +606,13 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
           turns: gen.turns
         });
 
-        // Mensaje claro:
-        if (gen.perfectPairs) {
-          setStatus("✅ Turnos generados SIN repetir parejas. Revisa auditoría abajo.", "ok");
+        if (gen.perfect) {
+          // ✅ EXACTO como lo pediste
+          setStatus("Perfecto: 0 parejas repetidas, 0 rivales repetidos", "ok");
         } else {
+          const a = gen.audit;
           setStatus(
-            "⚠️ No se pudo evitar repetir parejas con estos jugadores/turnos. Generé la mejor combinación posible. Mira auditoría abajo.",
+            `⚠️ No se encontró perfecto en ${gen.triesUsed} intentos. Generé la mejor combinación posible (parejas rep: ${a.pairRepeatCount}, rivales rep: ${a.oppRepeatCount}, max rival: ${a.oppMax}x). Mira auditoría abajo.`,
             "error"
           );
         }
