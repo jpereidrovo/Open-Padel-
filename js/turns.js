@@ -1,13 +1,5 @@
 // turns.js — Generar turnos + ingresar marcadores (fluido) + guardar a historial (results)
-//
-// ✅ Mejora de lógica:
-// 1) Evita repetir parejas dentro de cada equipo entre turnos CUANDO ES POSIBLE.
-// 2) Minimiza rivales repetidos (enfrentamientos jugador vs jugador).
-//
-// Nota importante (realidad matemática):
-// - Si un equipo tiene k parejas posibles por turno (k = min(#D,#R)) y k=2 (4 jugadores por equipo),
-//   solo existen 2 emparejamientos perfectos posibles. Con 3 turnos, alguna pareja debe repetirse.
-// - En esos casos, este generador minimiza repeticiones, pero no puede hacer magia.
+// ✅ Auditoría: detecta parejas repetidas y rivales repetidos automáticamente.
 
 import { Store } from "./store.js";
 import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
@@ -102,7 +94,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
   }
 
   // ============================================================
-  // ✅ NUEVO GENERADOR (no repetir parejas si es posible + minimiza rivales)
+  // Generador (el tuyo actual, sin tocar más)
   // ============================================================
 
   function shuffleCopy(arr) {
@@ -114,210 +106,236 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     return a;
   }
 
-  function pairKey(p) {
-    // p = [player1, player2]
-    const ids = [String(p?.[0]?.id || ""), String(p?.[1]?.id || "")].sort();
-    return ids.join("-");
-  }
-
-  function oppKey(aId, bId) {
-    // orderless key so A vs B same as B vs A
-    const ids = [String(aId), String(bId)].sort();
-    return ids.join("|");
-  }
-
-  function splitBySide(players) {
-    const D = players.filter(p => p.side === "D");
-    const R = players.filter(p => p.side === "R");
-    return { D, R };
-  }
-
-  // Número máximo de turnos SIN repetir parejas dentro de un equipo (límite realista)
-  function maxTurnsWithoutPairRepeats(k) {
-    // k = min(#D,#R) del equipo (cuántas parejas simultáneas se pueden formar por turno)
-    // - k=1 => 1 solo emparejamiento posible
-    // - k=2 => existen 2 emparejamientos perfectos posibles (no puedes hacer 3 turnos sin repetir)
-    // - k>=3 => puedes hacer al menos k turnos con rotaciones tipo latin, sin repetir parejas (en general)
-    if (k <= 1) return 1;
-    if (k === 2) return 2;
-    return k;
-  }
-
-  // Construye parejas disjuntas D-R, a partir de listas ya seleccionadas (mismo tamaño = courts)
-  function makePairs(Dsel, Rsel, shift) {
-    const n = Math.min(Dsel.length, Rsel.length);
+  function buildPairs(teamPlayers) {
+    const D = teamPlayers.filter(p => p.side === "D").sort((a,b)=>Number(b.rating)-Number(a.rating));
+    const R = teamPlayers.filter(p => p.side === "R").sort((a,b)=>Number(b.rating)-Number(a.rating));
     const pairs = [];
-    for (let i = 0; i < n; i++) {
-      pairs.push([Dsel[i], Rsel[(i + shift) % n]]);
-    }
+    const n = Math.min(D.length, R.length);
+    for (let i = 0; i < n; i++) pairs.push([D[i], R[i]]);
     return pairs;
   }
 
-  function buildMatchesFromPairs(Apairs, Bpairs, matchupShift) {
-    const courts = Math.min(Apairs.length, Bpairs.length);
-    const matches = [];
-    for (let i = 0; i < courts; i++) {
-      const bp = Bpairs[(i + matchupShift) % courts];
-      matches.push({
-        court: i + 1,
-        top: { team: "A", pair: Apairs[i] },
-        bottom: { team: "B", pair: bp },
-        scoreRaw: ""
-      });
+  function generateTurns(teamA, teamB, numTurns) {
+    const courts = Math.min(buildPairs(teamA).length, buildPairs(teamB).length);
+    if (courts <= 0) throw new Error("Equipos incompletos para armar parejas.");
+
+    const usedA = new Set();
+    const usedB = new Set();
+    const pairKey = (p) => [p[0].id, p[1].id].sort().join("-");
+
+    const turns = [];
+
+    for (let t = 1; t <= numTurns; t++) {
+      let best = null;
+
+      for (let attempt = 0; attempt < 60; attempt++) {
+        const AD = shuffleCopy(teamA.filter(p => p.side === "D"));
+        const AR = shuffleCopy(teamA.filter(p => p.side === "R"));
+        const BD = shuffleCopy(teamB.filter(p => p.side === "D"));
+        const BR = shuffleCopy(teamB.filter(p => p.side === "R"));
+
+        const nA = Math.min(AD.length, AR.length);
+        const nB = Math.min(BD.length, BR.length);
+
+        const Ause = [];
+        const Buse = [];
+
+        for (let i = 0; i < nA && Ause.length < courts; i++) Ause.push([AD[i], AR[i]]);
+        for (let i = 0; i < nB && Buse.length < courts; i++) Buse.push([BD[i], BR[i]]);
+
+        let newCount = 0;
+        for (const p of Ause) if (!usedA.has(pairKey(p))) newCount++;
+        for (const p of Buse) if (!usedB.has(pairKey(p))) newCount++;
+
+        if (!best || newCount > best.newCount) {
+          best = { Ause, Buse, newCount };
+          if (newCount === courts * 2) break;
+        }
+      }
+
+      for (const p of best.Ause) usedA.add(pairKey(p));
+      for (const p of best.Buse) usedB.add(pairKey(p));
+
+      const matches = [];
+      for (let i = 0; i < courts; i++) {
+        matches.push({
+          court: i + 1,
+          top: { team: "A", pair: best.Ause[i] },
+          bottom: { team: "B", pair: best.Buse[i] },
+          scoreRaw: ""
+        });
+      }
+
+      turns.push({ turnIndex: t, matches });
     }
-    return matches;
+
+    return { courts, turns };
   }
 
-  // Evalúa un calendario completo (turns) con penalidades:
-  // - Repetición de parejas (muy alta)
-  // - Repetición de enfrentamientos jugador vs jugador (alta)
-  // - Repetición de matchup pareja-vs-pareja (media)
-  function scoreSchedule(turns) {
-    const pairSeenA = new Map();
-    const pairSeenB = new Map();
-    const oppSeen = new Map();
-    const matchupSeen = new Map();
+  // ============================================================
+  // ✅ AUDITORÍA (parejas y rivales)
+  // ============================================================
 
-    let penalty = 0;
+  function pName(p) {
+    return String(p?.name || "").trim() || String(p?.id || "");
+  }
 
-    for (const t of turns) {
-      for (const m of t.matches) {
-        const aPair = m.top.pair;
-        const bPair = m.bottom.pair;
+  function pairIdKey(pair) {
+    const a = String(pair?.[0]?.id || "");
+    const b = String(pair?.[1]?.id || "");
+    return [a, b].sort().join("-");
+  }
 
-        const aPk = "A:" + pairKey(aPair);
-        const bPk = "B:" + pairKey(bPair);
+  function pairPretty(pair) {
+    return `${pName(pair?.[0])} / ${pName(pair?.[1])}`;
+  }
 
-        // pareja repetida (peso muy alto)
-        pairSeenA.set(aPk, (pairSeenA.get(aPk) || 0) + 1);
-        pairSeenB.set(bPk, (pairSeenB.get(bPk) || 0) + 1);
+  function oppKey(aId, bId) {
+    return [String(aId), String(bId)].sort().join("|");
+  }
 
-        // matchup pareja vs pareja (peso medio)
-        const mk = aPk + "||" + bPk;
-        matchupSeen.set(mk, (matchupSeen.get(mk) || 0) + 1);
+  function auditTurns(turns) {
+    const pairOccA = new Map(); // key -> [{turn,court,pretty}]
+    const pairOccB = new Map();
+    const oppOcc = new Map();   // key -> {count, aName, bName, samples[]}
+    const oppNames = new Map(); // id -> name
 
-        // rivales: cada jugador enfrenta 2 jugadores del otro lado
-        const aIds = [String(aPair[0].id), String(aPair[1].id)];
-        const bIds = [String(bPair[0].id), String(bPair[1].id)];
+    const addOcc = (map, key, occ) => {
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(occ);
+    };
+
+    for (const t of (turns || [])) {
+      for (const m of (t.matches || [])) {
+        const aPair = m?.top?.pair || [];
+        const bPair = m?.bottom?.pair || [];
+
+        const aKey = pairIdKey(aPair);
+        const bKey = pairIdKey(bPair);
+
+        addOcc(pairOccA, aKey, { turn: t.turnIndex, court: m.court, pretty: pairPretty(aPair) });
+        addOcc(pairOccB, bKey, { turn: t.turnIndex, court: m.court, pretty: pairPretty(bPair) });
+
+        const aIds = [aPair?.[0]?.id, aPair?.[1]?.id].map(String);
+        const bIds = [bPair?.[0]?.id, bPair?.[1]?.id].map(String);
+
+        oppNames.set(aIds[0], pName(aPair?.[0]));
+        oppNames.set(aIds[1], pName(aPair?.[1]));
+        oppNames.set(bIds[0], pName(bPair?.[0]));
+        oppNames.set(bIds[1], pName(bPair?.[1]));
+
+        // Cada jugador A enfrenta a 2 jugadores B en ese partido
         for (const ai of aIds) for (const bi of bIds) {
           const ok = oppKey(ai, bi);
-          oppSeen.set(ok, (oppSeen.get(ok) || 0) + 1);
+          if (!oppOcc.has(ok)) {
+            oppOcc.set(ok, { count: 0, aId: ai, bId: bi, samples: [] });
+          }
+          const obj = oppOcc.get(ok);
+          obj.count += 1;
+          if (obj.samples.length < 5) obj.samples.push({ turn: t.turnIndex, court: m.court });
         }
       }
     }
 
-    // Penaliza repeticiones: count=1 ok, count=2 pequeño, count=3 grande, etc.
-    for (const [, c] of pairSeenA) if (c > 1) penalty += (c - 1) * 10000;
-    for (const [, c] of pairSeenB) if (c > 1) penalty += (c - 1) * 10000;
+    const repeatedPairsA = [];
+    const repeatedPairsB = [];
 
-    for (const [, c] of matchupSeen) if (c > 1) penalty += (c - 1) * 1200;
+    for (const [k, occ] of pairOccA.entries()) {
+      if (occ.length > 1) repeatedPairsA.push({ key: k, count: occ.length, occ });
+    }
+    for (const [k, occ] of pairOccB.entries()) {
+      if (occ.length > 1) repeatedPairsB.push({ key: k, count: occ.length, occ });
+    }
 
-    // Oponentes repetidos: queremos minimizar
-    for (const [, c] of oppSeen) {
-      if (c > 1) {
-        // 2 veces: penalidad; 3 veces: penalidad mayor
-        penalty += (c - 1) * (c === 2 ? 150 : 600);
+    const repeatedOpponents = [];
+    for (const [k, obj] of oppOcc.entries()) {
+      if (obj.count > 1) {
+        const aName = oppNames.get(obj.aId) || obj.aId;
+        const bName = oppNames.get(obj.bId) || obj.bId;
+        repeatedOpponents.push({
+          key: k,
+          count: obj.count,
+          aName,
+          bName,
+          samples: obj.samples
+        });
       }
     }
 
-    return penalty;
+    repeatedPairsA.sort((x,y)=> y.count - x.count);
+    repeatedPairsB.sort((x,y)=> y.count - x.count);
+    repeatedOpponents.sort((x,y)=> y.count - x.count);
+
+    const okPairs = repeatedPairsA.length === 0 && repeatedPairsB.length === 0;
+    const okOpp = repeatedOpponents.length === 0;
+
+    return {
+      okPairs,
+      okOpp,
+      repeatedPairsA,
+      repeatedPairsB,
+      repeatedOpponents
+    };
   }
 
-  // Genera turnos con búsqueda aleatoria guiada.
-  function generateTurns(teamA, teamB, numTurns) {
-    const { D: AD, R: AR } = splitBySide(teamA);
-    const { D: BD, R: BR } = splitBySide(teamB);
+  function renderAuditPanel(turns) {
+    if (!turns || !turns.length) return "";
 
-    const courts = Math.min(AD.length, AR.length, BD.length, BR.length);
-    if (courts <= 0) throw new Error("Equipos incompletos para armar parejas (faltan D o R).");
+    const audit = auditTurns(turns);
 
-    // Límite real de no repetir parejas (por equipo)
-    const maxNoRepeatA = maxTurnsWithoutPairRepeats(courts);
-    const maxNoRepeatB = maxTurnsWithoutPairRepeats(courts);
-    const hardMaxNoRepeat = Math.min(maxNoRepeatA, maxNoRepeatB);
+    const badge = (ok) =>
+      ok
+        ? `<span class="hint ok"><b>OK</b></span>`
+        : `<span class="hint error"><b>WARN</b></span>`;
 
-    // Si el usuario pide 3 turnos pero solo hay 2 parejas por lado (4 jugadores por equipo),
-    // no existe solución sin repetir parejas.
-    if (numTurns > hardMaxNoRepeat) {
-      throw new Error(
-        `Con ${courts} parejas por equipo, no se puede generar ${numTurns} turnos sin repetir parejas. ` +
-        `Máximo sin repetir: ${hardMaxNoRepeat}. ` +
-        `Solución: reduce turnos o aumenta jugadores (mínimo 6 por equipo para 3 turnos).`
-      );
-    }
+    const listPairs = (items) => {
+      if (!items.length) return `<div class="hint muted">Sin repeticiones.</div>`;
+      return items.slice(0, 20).map(it => {
+        const label = it.occ?.[0]?.pretty || it.key;
+        const where = it.occ.map(o => `T${o.turn}-C${o.court}`).join(", ");
+        return `<div class="hint muted">• <b>${esc(label)}</b> — ${esc(it.count)} veces (${esc(where)})</div>`;
+      }).join("");
+    };
 
-    // Búsqueda: intentamos muchas combinaciones de shifts para minimizar rivales repetidos.
-    // Como ya garantizamos que exista solución sin repetir parejas, apuntamos a penalty 0 en parejas,
-    // y minimizamos rival repeats.
-    const MAX_TRIES = 3000;
+    const listOpp = (items) => {
+      if (!items.length) return `<div class="hint muted">Sin rivales repetidos.</div>`;
+      return items.slice(0, 25).map(it => {
+        const where = (it.samples || []).map(s => `T${s.turn}-C${s.court}`).join(", ");
+        return `<div class="hint muted">• <b>${esc(it.aName)}</b> vs <b>${esc(it.bName)}</b> — ${esc(it.count)} veces (${esc(where)})</div>`;
+      }).join("");
+    };
 
-    let bestTurns = null;
-    let bestScore = Infinity;
+    return `
+      <div class="card" style="margin-top:12px;">
+        <h3 style="margin:0 0 10px;">Auditoría automática</h3>
 
-    for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
-      // Partimos de listas aleatorizadas por intento
-      const ADs = shuffleCopy(AD);
-      const ARs = shuffleCopy(AR);
-      const BDs = shuffleCopy(BD);
-      const BRs = shuffleCopy(BR);
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <div class="hint muted">Parejas repetidas:</div>
+          ${badge(audit.okPairs)}
+          <div class="hint muted" style="margin-left:8px;">Rivales repetidos:</div>
+          ${badge(audit.okOpp)}
+        </div>
 
-      const turns = [];
-      const usedPairsA = new Set();
-      const usedPairsB = new Set();
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-top:10px;">
+          <div class="card" style="background: rgba(0,0,0,.12);">
+            <h4 style="margin:0 0 8px;">Parejas repetidas — Equipo A</h4>
+            ${listPairs(audit.repeatedPairsA)}
+          </div>
+          <div class="card" style="background: rgba(0,0,0,.12);">
+            <h4 style="margin:0 0 8px;">Parejas repetidas — Equipo B</h4>
+            ${listPairs(audit.repeatedPairsB)}
+          </div>
+        </div>
 
-      let ok = true;
-
-      for (let t = 1; t <= numTurns; t++) {
-        // shifts para variar parejas por turno
-        const aShift = Math.floor(Math.random() * courts);
-        const bShift = Math.floor(Math.random() * courts);
-
-        // Para evitar repetición, probamos algunos shifts candidatos (pequeño loop)
-        let Apairs = null;
-        let Bpairs = null;
-
-        for (let saTry = 0; saTry < courts; saTry++) {
-          const sa = (aShift + saTry) % courts;
-          const candA = makePairs(ADs.slice(0, courts), ARs.slice(0, courts), (sa + (t - 1)) % courts);
-          const hasRepeatA = candA.some(p => usedPairsA.has(pairKey(p)));
-          if (!hasRepeatA) { Apairs = candA; break; }
-        }
-
-        for (let sbTry = 0; sbTry < courts; sbTry++) {
-          const sb = (bShift + sbTry) % courts;
-          const candB = makePairs(BDs.slice(0, courts), BRs.slice(0, courts), (sb + (t - 1)) % courts);
-          const hasRepeatB = candB.some(p => usedPairsB.has(pairKey(p)));
-          if (!hasRepeatB) { Bpairs = candB; break; }
-        }
-
-        if (!Apairs || !Bpairs) { ok = false; break; }
-
-        // matchup shift para bajar rivales repetidos
-        const matchupShift = (t - 1) % courts;
-
-        const matches = buildMatchesFromPairs(Apairs, Bpairs, matchupShift);
-        turns.push({ turnIndex: t, matches });
-
-        // marcar parejas usadas
-        for (const p of Apairs) usedPairsA.add(pairKey(p));
-        for (const p of Bpairs) usedPairsB.add(pairKey(p));
-      }
-
-      if (!ok) continue;
-
-      const s = scoreSchedule(turns);
-      if (s < bestScore) {
-        bestScore = s;
-        bestTurns = turns;
-        if (bestScore === 0) break; // perfecto
-      }
-    }
-
-    if (!bestTurns) {
-      throw new Error("No se pudo generar turnos válidos sin repetir parejas. Revisa balance D/R o reduce turnos.");
-    }
-
-    return { courts, turns: bestTurns };
+        <div class="card" style="background: rgba(0,0,0,.12); margin-top:12px;">
+          <h4 style="margin:0 0 8px;">Rivales repetidos (Jugador vs Jugador)</h4>
+          <div class="hint muted">Si ves “3 veces”, significa que esos dos jugadores se enfrentaron 3 veces en todos los turnos.</div>
+          <div style="margin-top:8px;">
+            ${listOpp(audit.repeatedOpponents)}
+          </div>
+        </div>
+      </div>
+    `;
   }
 
   // ---------- UI render ----------
@@ -351,6 +369,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
             </div>
 
             <div class="btns">
+              <button class="ghost" id="btnAudit" type="button" ${turnsState.length ? "" : "disabled"}>Auditar</button>
               <button class="ghost" id="btnGenTurns" type="button">Generar turnos</button>
               <button class="primary" id="btnSaveTurns" type="button" disabled>Guardar resultados</button>
             </div>
@@ -362,6 +381,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
       <div id="turnsTable"></div>
       <div id="turnsResults"></div>
+      <div id="turnsAudit"></div>
     `;
 
     const statusEl = $("turnsStatus");
@@ -376,11 +396,13 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
     const table = $("turnsTable");
     const results = $("turnsResults");
+    const auditMount = $("turnsAudit");
     const btnSave = $("btnSaveTurns");
 
     function updateResultsUI() {
       if (!turnsState.length) {
         results.innerHTML = "";
+        if (auditMount) auditMount.innerHTML = "";
         btnSave.disabled = true;
         return;
       }
@@ -399,12 +421,16 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         </div>
       `;
       btnSave.disabled = !allScoresComplete(turnsState);
+
+      // Auditoría siempre visible (automática)
+      if (auditMount) auditMount.innerHTML = renderAuditPanel(turnsState);
     }
 
     function drawTurnsUI() {
       if (!turnsState.length) {
         table.innerHTML = `<div class="card" style="margin-top:12px;"><div class="hint muted">Aún no hay turnos generados.</div></div>`;
         results.innerHTML = "";
+        if (auditMount) auditMount.innerHTML = "";
         btnSave.disabled = true;
         return;
       }
@@ -506,6 +532,11 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
     drawTurnsUI();
 
+    $("btnAudit")?.addEventListener("click", () => {
+      if (auditMount) auditMount.innerHTML = renderAuditPanel(turnsState);
+      setStatus("Auditoría actualizada.", "muted");
+    });
+
     $("btnGenTurns")?.addEventListener("click", async () => {
       try {
         setStatus("Generando turnos…", "muted");
@@ -522,7 +553,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
           turns: gen.turns
         });
 
-        setStatus("✅ Turnos generados. Completa marcadores para guardar.", "ok");
+        setStatus("✅ Turnos generados. Auditoría lista abajo.", "ok");
         render();
       } catch (e) {
         console.error(e);
