@@ -1,6 +1,6 @@
 // turns.js — Generar turnos + auditoría + PDF fixture/resultados + guardar historial
-// ✅ Busca calendario perfecto cuando es posible
-// ✅ PDF fixture antes de resultados
+// ✅ Robusto con supabaseApi viejo o nuevo
+// ✅ PDF fixture antes de guardar resultados
 // ✅ PDF resultados después de llenar marcadores
 // ✅ No toca auth
 
@@ -9,6 +9,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
 (function () {
   const $ = (id) => document.getElementById(id);
+
   const esc = (s) => String(s ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -52,7 +53,11 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
   }
 
   function allScoresComplete(turns) {
-    for (const t of turns) for (const m of t.matches) if (!parseScore(m.scoreRaw)) return false;
+    for (const t of turns) {
+      for (const m of t.matches) {
+        if (!parseScore(m.scoreRaw)) return false;
+      }
+    }
     return true;
   }
 
@@ -80,17 +85,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     }
 
     return { totalA, totalB, perTurn };
-  }
-
-  async function ensureTeamsLoaded(dateISO) {
-    const A = Store.state?.team_a || [];
-    const B = Store.state?.team_b || [];
-    if (A.length && B.length) return { A, B };
-
-    const detail = await getHistoryDetail(dateISO);
-    const session = detail?.session;
-    if (!session) throw new Error("No hay equipos guardados en esta fecha. Ve a Equipos y guarda primero.");
-    return { A: session.team_a || [], B: session.team_b || [] };
   }
 
   function pName(p) {
@@ -141,14 +135,16 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         oppNames.set(bIds[0], pName(bPair?.[0]));
         oppNames.set(bIds[1], pName(bPair?.[1]));
 
-        for (const ai of aIds) for (const bi of bIds) {
-          const ok = oppKey(ai, bi);
-          if (!oppOcc.has(ok)) {
-            oppOcc.set(ok, { count: 0, aId: ai, bId: bi, samples: [] });
+        for (const ai of aIds) {
+          for (const bi of bIds) {
+            const ok = oppKey(ai, bi);
+            if (!oppOcc.has(ok)) {
+              oppOcc.set(ok, { count: 0, aId: ai, bId: bi, samples: [] });
+            }
+            const obj = oppOcc.get(ok);
+            obj.count += 1;
+            if (obj.samples.length < 6) obj.samples.push({ turn: t.turnIndex, court: m.court });
           }
-          const obj = oppOcc.get(ok);
-          obj.count += 1;
-          if (obj.samples.length < 6) obj.samples.push({ turn: t.turnIndex, court: m.court });
         }
       }
     }
@@ -164,12 +160,11 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     }
 
     const repeatedOpponents = [];
-    for (const [k, obj] of oppOcc.entries()) {
+    for (const [, obj] of oppOcc.entries()) {
       if (obj.count > 1) {
         const aName = oppNames.get(obj.aId) || obj.aId;
         const bName = oppNames.get(obj.bId) || obj.bId;
         repeatedOpponents.push({
-          key: k,
           count: obj.count,
           aName,
           bName,
@@ -178,19 +173,19 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       }
     }
 
-    repeatedPairsA.sort((x,y)=> y.count - x.count);
-    repeatedPairsB.sort((x,y)=> y.count - x.count);
-    repeatedOpponents.sort((x,y)=> y.count - x.count);
+    repeatedPairsA.sort((x, y) => y.count - x.count);
+    repeatedPairsB.sort((x, y) => y.count - x.count);
+    repeatedOpponents.sort((x, y) => y.count - x.count);
 
     const okPairs = repeatedPairsA.length === 0 && repeatedPairsB.length === 0;
     const okOpp = repeatedOpponents.length === 0;
 
     const pairRepeatCount =
-      repeatedPairsA.reduce((a,it)=>a + (it.count - 1), 0) +
-      repeatedPairsB.reduce((a,it)=>a + (it.count - 1), 0);
+      repeatedPairsA.reduce((a, it) => a + (it.count - 1), 0) +
+      repeatedPairsB.reduce((a, it) => a + (it.count - 1), 0);
 
-    const oppRepeatCount = repeatedOpponents.reduce((a,it)=>a + (it.count - 1), 0);
-    const oppMax = repeatedOpponents.length ? Math.max(...repeatedOpponents.map(x=>x.count)) : 1;
+    const oppRepeatCount = repeatedOpponents.reduce((a, it) => a + (it.count - 1), 0);
+    const oppMax = repeatedOpponents.length ? Math.max(...repeatedOpponents.map(x => x.count)) : 1;
 
     return {
       okPairs,
@@ -376,6 +371,56 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     };
   }
 
+  // ---------- API wrappers robustos ----------
+  async function apiGetHistoryDetail(dateISO) {
+    const sessionNo = Number(Store.state?.session_no || 1);
+
+    try {
+      if (typeof getHistoryDetail === "function" && getHistoryDetail.length >= 2) {
+        return await getHistoryDetail(dateISO, sessionNo);
+      }
+      return await getHistoryDetail(dateISO);
+    } catch (e) {
+      throw e;
+    }
+  }
+
+  async function apiSaveResults(dateISO, turnsPayload, scoresPayload, summaryPayload) {
+    const sessionNo = Number(Store.state?.session_no || 1);
+
+    try {
+      if (typeof saveResultsToHistory === "function" && saveResultsToHistory.length >= 5) {
+        return await saveResultsToHistory(dateISO, sessionNo, turnsPayload, scoresPayload, summaryPayload);
+      }
+      return await saveResultsToHistory(dateISO, turnsPayload, scoresPayload, summaryPayload);
+    } catch (e) {
+      throw e;
+    }
+  }
+
+  // ---------- session source robusto ----------
+  function getSessionForPdfFromStore(dateISO) {
+    const A = Array.isArray(Store.state?.team_a) ? Store.state.team_a : [];
+    const B = Array.isArray(Store.state?.team_b) ? Store.state.team_b : [];
+    if (!A.length && !B.length) return null;
+
+    return {
+      session_date: dateISO,
+      totalPlayers: A.length + B.length,
+      team_a: A,
+      team_b: B
+    };
+  }
+
+  async function getSessionForPdf(dateISO) {
+    const fromStore = getSessionForPdfFromStore(dateISO);
+    if (fromStore) return fromStore;
+
+    const detail = await apiGetHistoryDetail(dateISO);
+    return detail?.session || null;
+  }
+
+  // ---------- PDF ----------
   function getJsPDF() {
     const jspdf = window.jspdf;
     if (!jspdf || !jspdf.jsPDF) {
@@ -385,8 +430,8 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
   }
 
   function pdfNiceDate(dateISO) {
-    const d = new Date(String(dateISO).slice(0,10) + "T00:00:00");
-    if (Number.isNaN(d.getTime())) return String(dateISO).slice(0,10);
+    const d = new Date(String(dateISO).slice(0, 10) + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return String(dateISO).slice(0, 10);
     return d.toLocaleDateString("es-EC", { year: "numeric", month: "short", day: "2-digit" });
   }
 
@@ -619,7 +664,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
               <button class="ghost" id="btnGenTurns" type="button">Generar turnos</button>
               <button class="ghost" id="btnPdfFixture" type="button" ${turnsState.length ? "" : "disabled"}>PDF (fixture)</button>
               <button class="ghost" id="btnPdfResults" type="button" ${allScoresComplete(turnsState) ? "" : "disabled"}>PDF (resultados)</button>
-              <button class="primary" id="btnSaveTurns" type="button" disabled>Guardar resultados</button>
+              <button class="primary" id="btnSaveTurns" type="button" ${allScoresComplete(turnsState) ? "" : "disabled"}>Guardar resultados</button>
             </div>
           </div>
         </div>
@@ -654,8 +699,8 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         results.innerHTML = "";
         if (auditMount) auditMount.innerHTML = "";
         btnSave.disabled = true;
-        if (btnPdfFixture) btnPdfFixture.disabled = true;
-        if (btnPdfResults) btnPdfResults.disabled = true;
+        btnPdfFixture.disabled = true;
+        btnPdfResults.disabled = true;
         return;
       }
 
@@ -673,9 +718,10 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
           </div>
         </div>
       `;
+
       btnSave.disabled = !allScoresComplete(turnsState);
-      if (btnPdfFixture) btnPdfFixture.disabled = false;
-      if (btnPdfResults) btnPdfResults.disabled = !allScoresComplete(turnsState);
+      btnPdfFixture.disabled = false;
+      btnPdfResults.disabled = !allScoresComplete(turnsState);
 
       if (auditMount) auditMount.innerHTML = renderAuditPanel(turnsState);
     }
@@ -686,8 +732,8 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         results.innerHTML = "";
         if (auditMount) auditMount.innerHTML = "";
         btnSave.disabled = true;
-        if (btnPdfFixture) btnPdfFixture.disabled = true;
-        if (btnPdfResults) btnPdfResults.disabled = true;
+        btnPdfFixture.disabled = true;
+        btnPdfResults.disabled = true;
         return;
       }
 
@@ -829,19 +875,21 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     $("btnPdfFixture")?.addEventListener("click", async () => {
       try {
         const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
-        const detail = await getHistoryDetail(dateISO);
-        if (!detail?.session) throw new Error("No hay equipos guardados para esta fecha (guarda equipos primero).");
+        const session = await getSessionForPdf(dateISO);
+        if (!session) throw new Error("No hay equipos disponibles para el fixture. Ve a Equipos y arma/guarda equipos primero.");
 
         const t = Array.isArray(Store.state?.turns) ? Store.state.turns : [];
         if (!t.length) throw new Error("Primero genera turnos.");
 
         makePdf({
           mode: "fixture",
-          session: detail.session,
+          session,
           turns: t,
           summary: null,
           dateISO
         });
+
+        setStatus("✅ Fixture exportado en PDF.", "ok");
       } catch (e) {
         console.error(e);
         setStatus(`❌ PDF fixture: ${e?.message || e}`, "error");
@@ -851,8 +899,8 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     $("btnPdfResults")?.addEventListener("click", async () => {
       try {
         const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
-        const detail = await getHistoryDetail(dateISO);
-        if (!detail?.session) throw new Error("No hay equipos guardados para esta fecha (guarda equipos primero).");
+        const session = await getSessionForPdf(dateISO);
+        if (!session) throw new Error("No hay equipos disponibles para el PDF.");
 
         const t = Array.isArray(Store.state?.turns) ? Store.state.turns : [];
         if (!t.length) throw new Error("Primero genera turnos.");
@@ -862,11 +910,13 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
         makePdf({
           mode: "results",
-          session: detail.session,
+          session,
           turns: t,
           summary,
           dateISO
         });
+
+        setStatus("✅ Resultados exportados en PDF.", "ok");
       } catch (e) {
         console.error(e);
         setStatus(`❌ PDF resultados: ${e?.message || e}`, "error");
@@ -895,16 +945,15 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         }));
 
         const scoresPayload = { generatedAt: new Date().toISOString() };
-
         const summaryPayload = {
           totalA: summary.totalA,
           totalB: summary.totalB,
           perTurn: summary.perTurn
         };
 
-        await saveResultsToHistory(dateISO, turnsPayload, scoresPayload, summaryPayload);
+        await apiSaveResults(dateISO, turnsPayload, scoresPayload, summaryPayload);
 
-        setStatus("✅ Resultados guardados. Ve a Historial.", "ok");
+        setStatus("✅ Resultados guardados. Ya puedes sacar PDF de resultados.", "ok");
       } catch (e) {
         console.error(e);
         setStatus(`❌ Error al guardar resultados: ${e?.message || e}`, "error");
