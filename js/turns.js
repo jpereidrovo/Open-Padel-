@@ -1,7 +1,8 @@
-// turns.js — Generar turnos + ingresar marcadores (fluido) + guardar a historial (results)
-// ✅ Auto-reintentos: busca calendario PERFECTO (0 parejas repetidas, 0 rivales repetidos) cuando sea posible.
-// ✅ Si NO existe/NO se encuentra, deja el mejor y lo reporta.
-// ✅ Auditoría: lista automáticamente qué se repite (parejas y rivales).
+// turns.js — Generar turnos + auditoría + PDF fixture/resultados + guardar historial
+// ✅ Busca calendario perfecto cuando es posible
+// ✅ PDF fixture antes de resultados
+// ✅ PDF resultados después de llenar marcadores
+// ✅ No toca auth
 
 import { Store } from "./store.js";
 import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
@@ -23,7 +24,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     return `${yyyy}-${mm}-${dd}`;
   }
 
-  // ---------- Score helpers ----------
   function scoreDigits(raw) {
     return String(raw || "").replace(/\D/g, "").slice(0, 2);
   }
@@ -51,7 +51,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     return sc.a > sc.b ? "A" : "B";
   }
 
-  // ---------- Turn summary ----------
   function allScoresComplete(turns) {
     for (const t of turns) for (const m of t.matches) if (!parseScore(m.scoreRaw)) return false;
     return true;
@@ -83,7 +82,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     return { totalA, totalB, perTurn };
   }
 
-  // ---------- Load teams ----------
   async function ensureTeamsLoaded(dateISO) {
     const A = Store.state?.team_a || [];
     const B = Store.state?.team_b || [];
@@ -94,10 +92,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     if (!session) throw new Error("No hay equipos guardados en esta fecha. Ve a Equipos y guarda primero.");
     return { A: session.team_a || [], B: session.team_b || [] };
   }
-
-  // ============================================================
-  // ✅ Auditoría (parejas y rivales)
-  // ============================================================
 
   function pName(p) {
     return String(p?.name || "").trim() || String(p?.id || "");
@@ -118,10 +112,10 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
   }
 
   function auditTurns(turns) {
-    const pairOccA = new Map(); // key -> [{turn,court,pretty}]
+    const pairOccA = new Map();
     const pairOccB = new Map();
-    const oppOcc = new Map();   // key -> {count, aName, bName, samples[]}
-    const oppNames = new Map(); // id -> name
+    const oppOcc = new Map();
+    const oppNames = new Map();
 
     const addOcc = (map, key, occ) => {
       if (!map.has(key)) map.set(key, []);
@@ -276,10 +270,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     `;
   }
 
-  // ============================================================
-  // ✅ Generación con auto-reintentos (busca PERFECTO)
-  // ============================================================
-
   function shuffleCopy(arr) {
     const a = arr.slice();
     for (let i = a.length - 1; i > 0; i--) {
@@ -296,7 +286,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     };
   }
 
-  // genera un candidato random
   function generateCandidate(teamA, teamB, numTurns) {
     const { D: AD0, R: AR0 } = splitBySide(teamA);
     const { D: BD0, R: BR0 } = splitBySide(teamB);
@@ -320,7 +309,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       const Bpairs = [];
 
       for (let i = 0; i < courts; i++) {
-        // rotación distinta por turno
         Apairs.push([AD[i], AR[(i + aShift + t) % courts]]);
         Bpairs.push([BD[i], BR[(i + bShift + t) % courts]]);
       }
@@ -342,17 +330,15 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     return { courts, turns };
   }
 
-  // score: minimiza repeticiones (parejas súper alto, rivales alto, luego evitar max>2)
   function scoreCandidate(turns) {
     const a = auditTurns(turns);
-    const pairsPenalty = a.pairRepeatCount * 100000; // dominante
+    const pairsPenalty = a.pairRepeatCount * 100000;
     const oppPenalty = a.oppRepeatCount * 2000;
     const oppMaxPenalty = Math.max(0, a.oppMax - 2) * 5000;
     return pairsPenalty + oppPenalty + oppMaxPenalty;
   }
 
-  // busca perfecto; si no encuentra, devuelve mejor
-  function generateTurnsSmart(teamA, teamB, numTurns, tries = 5000) {
+  function generateTurnsSmart(teamA, teamB, numTurns, tries = 8000) {
     let best = null;
     let bestScore = Infinity;
     let bestAudit = null;
@@ -361,7 +347,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       const cand = generateCandidate(teamA, teamB, numTurns);
       const a = auditTurns(cand.turns);
 
-      // ✅ perfecto = 0 parejas repetidas y 0 rivales repetidos
       if (a.okPairs && a.okOpp) {
         return {
           courts: cand.courts,
@@ -391,7 +376,215 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     };
   }
 
-  // ---------- UI render ----------
+  function getJsPDF() {
+    const jspdf = window.jspdf;
+    if (!jspdf || !jspdf.jsPDF) {
+      throw new Error("jsPDF no está cargado en index.html.");
+    }
+    return jspdf.jsPDF;
+  }
+
+  function pdfNiceDate(dateISO) {
+    const d = new Date(String(dateISO).slice(0,10) + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return String(dateISO).slice(0,10);
+    return d.toLocaleDateString("es-EC", { year: "numeric", month: "short", day: "2-digit" });
+  }
+
+  function drawTeamsAll(doc, session, pageW, pageH, margin, startY) {
+    const A = session?.team_a || [];
+    const B = session?.team_b || [];
+
+    const maxW = pageW - margin * 2;
+    const boxH = 14 + (Math.max(A.length, B.length) * 5.2) + 10;
+    const minH = 46;
+    const h = Math.max(minH, Math.min(boxH, 150));
+    let y = startY;
+
+    if (y + h > pageH - 18) {
+      doc.addPage();
+      y = 14;
+    }
+
+    doc.setDrawColor(40);
+    doc.setLineWidth(0.2);
+    doc.rect(margin, y, maxW, h);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("Equipos", margin + 3, y + 6);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+
+    doc.setFont("helvetica", "bold");
+    doc.text(`Equipo A (${A.length})`, margin + 3, y + 14);
+    doc.text(`Equipo B (${B.length})`, margin + (maxW / 2) + 3, y + 14);
+    doc.setFont("helvetica", "normal");
+
+    const row = (p) => `${p?.name || ""} (${p?.side || ""} ${Number(p?.rating || 0).toFixed(1)})`;
+
+    const maxRowsPerPage = Math.floor((h - 20) / 5.2);
+    const rowsToShow = Math.max(A.length, B.length);
+
+    let offset = 0;
+    let firstBlock = true;
+
+    while (offset < rowsToShow) {
+      if (!firstBlock) {
+        doc.addPage();
+        y = 14;
+        doc.setDrawColor(40);
+        doc.setLineWidth(0.2);
+        doc.rect(margin, y, maxW, h);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.text("Equipos (continuación)", margin + 3, y + 6);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        doc.text(`Equipo A (${A.length})`, margin + 3, y + 14);
+        doc.text(`Equipo B (${B.length})`, margin + (maxW / 2) + 3, y + 14);
+        doc.setFont("helvetica", "normal");
+      }
+
+      for (let i = 0; i < maxRowsPerPage; i++) {
+        const idx = offset + i;
+        const yy = y + 20 + i * 5.2;
+        if (A[idx]) doc.text(row(A[idx]), margin + 3, yy);
+        if (B[idx]) doc.text(row(B[idx]), margin + (maxW / 2) + 3, yy);
+      }
+
+      offset += maxRowsPerPage;
+      firstBlock = false;
+    }
+
+    return startY + h + 6;
+  }
+
+  function makePdf({ mode, session, turns, summary, dateISO }) {
+    const jsPDF = getJsPDF();
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+
+    const pageW = 210;
+    const pageH = 297;
+    const margin = 12;
+    const date = String(dateISO || session?.session_date || "").slice(0, 10) || todayISO();
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text("Open Padel — Resumen", margin, 14);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text(`Fecha: ${pdfNiceDate(date)}`, margin, 20);
+    doc.text(mode === "results" ? "Tipo: Resultados" : "Tipo: Fixture", margin, 25);
+
+    let y = 30;
+    y = drawTeamsAll(doc, session, pageW, pageH, margin, y);
+
+    const maxW = pageW - margin * 2;
+
+    doc.setDrawColor(40);
+    doc.setLineWidth(0.2);
+    doc.rect(margin, y, maxW, 10);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text(mode === "results" ? "Turnos (Resultados)" : "Turnos (Fixture)", margin + 3, y + 6);
+    doc.setFont("helvetica", "normal");
+    y += 14;
+
+    for (const t of (turns || [])) {
+      if (y > pageH - 40) {
+        doc.addPage();
+        y = 14;
+      }
+
+      doc.setDrawColor(40);
+      doc.setLineWidth(0.2);
+      doc.rect(margin, y, maxW, 8);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text(`Turno ${t.turnIndex}`, margin + 3, y + 6);
+      doc.setFont("helvetica", "normal");
+
+      y += 12;
+
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.text("Cancha", margin + 3, y);
+      doc.text("Equipo A (arriba)", margin + 22, y);
+      doc.text("Equipo B (abajo)", margin + 110, y);
+      doc.text("Score", margin + 182, y);
+      doc.setFont("helvetica", "normal");
+
+      y += 5;
+      doc.line(margin, y, margin + maxW, y);
+      y += 5;
+
+      for (const m of (t.matches || [])) {
+        if (y > pageH - 20) {
+          doc.addPage();
+          y = 14;
+        }
+
+        const top = m?.top?.pair || [];
+        const bot = m?.bottom?.pair || [];
+
+        const topTxt = `${top?.[0]?.name || ""} / ${top?.[1]?.name || ""}`;
+        const botTxt = `${bot?.[0]?.name || ""} / ${bot?.[1]?.name || ""}`;
+
+        const sc = mode === "results" ? formatScore(m.scoreRaw || m.score) : "";
+        const scShow = sc || "—";
+
+        doc.text(`#${String(m.court)}`, margin + 3, y);
+        doc.text(topTxt, margin + 22, y);
+        doc.text(botTxt, margin + 110, y);
+        doc.text(scShow, margin + 182, y);
+
+        y += 6;
+      }
+
+      y += 4;
+    }
+
+    if (mode === "results") {
+      if (y > pageH - 45) {
+        doc.addPage();
+        y = 14;
+      }
+
+      const sum = summary || { totalA: 0, totalB: 0, perTurn: [] };
+
+      doc.setDrawColor(40);
+      doc.setLineWidth(0.2);
+      doc.rect(margin, y, maxW, 34);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("Resumen Global", margin + 3, y + 6);
+
+      doc.setFontSize(11);
+      doc.text(`Equipo A: ${sum.totalA} puntos`, margin + 3, y + 14);
+      doc.text(`Equipo B: ${sum.totalB} puntos`, margin + 3, y + 20);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+
+      const per = Array.isArray(sum.perTurn) ? sum.perTurn : [];
+      const lines = per.slice(0, 5).map(pt => `Turno ${pt.turn}: A ${pt.aPts} • B ${pt.bPts}`);
+      for (let i = 0; i < lines.length; i++) {
+        doc.text(lines[i], margin + 90, y + 14 + i * 6);
+      }
+    }
+
+    const filename =
+      mode === "results"
+        ? `OpenPadel_${date}_resultados.pdf`
+        : `OpenPadel_${date}_fixture.pdf`;
+
+    doc.save(filename);
+  }
+
   function render() {
     const mount = $("turnsMount");
     if (!mount) return;
@@ -424,6 +617,8 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
             <div class="btns">
               <button class="ghost" id="btnAudit" type="button" ${turnsState.length ? "" : "disabled"}>Auditar</button>
               <button class="ghost" id="btnGenTurns" type="button">Generar turnos</button>
+              <button class="ghost" id="btnPdfFixture" type="button" ${turnsState.length ? "" : "disabled"}>PDF (fixture)</button>
+              <button class="ghost" id="btnPdfResults" type="button" ${allScoresComplete(turnsState) ? "" : "disabled"}>PDF (resultados)</button>
               <button class="primary" id="btnSaveTurns" type="button" disabled>Guardar resultados</button>
             </div>
           </div>
@@ -438,7 +633,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     `;
 
     const statusEl = $("turnsStatus");
-    const setStatus = (msg, cls="muted") => {
+    const setStatus = (msg, cls = "muted") => {
       statusEl.textContent = msg || "";
       statusEl.className = "hint " + cls;
     };
@@ -451,14 +646,19 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     const results = $("turnsResults");
     const auditMount = $("turnsAudit");
     const btnSave = $("btnSaveTurns");
+    const btnPdfFixture = $("btnPdfFixture");
+    const btnPdfResults = $("btnPdfResults");
 
     function updateResultsUI() {
       if (!turnsState.length) {
         results.innerHTML = "";
         if (auditMount) auditMount.innerHTML = "";
         btnSave.disabled = true;
+        if (btnPdfFixture) btnPdfFixture.disabled = true;
+        if (btnPdfResults) btnPdfResults.disabled = true;
         return;
       }
+
       const summary = computeSummary(turnsState);
       results.innerHTML = `
         <div class="card" style="margin-top:12px;">
@@ -474,6 +674,8 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         </div>
       `;
       btnSave.disabled = !allScoresComplete(turnsState);
+      if (btnPdfFixture) btnPdfFixture.disabled = false;
+      if (btnPdfResults) btnPdfResults.disabled = !allScoresComplete(turnsState);
 
       if (auditMount) auditMount.innerHTML = renderAuditPanel(turnsState);
     }
@@ -484,6 +686,8 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         results.innerHTML = "";
         if (auditMount) auditMount.innerHTML = "";
         btnSave.disabled = true;
+        if (btnPdfFixture) btnPdfFixture.disabled = true;
+        if (btnPdfResults) btnPdfResults.disabled = true;
         return;
       }
 
@@ -597,7 +801,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         const numTurns = Number($("turnCount")?.value || 3);
 
         const { A, B } = await ensureTeamsLoaded(dateISO);
-
         const gen = generateTurnsSmart(A, B, numTurns, 8000);
 
         Store.setState({
@@ -607,7 +810,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         });
 
         if (gen.perfect) {
-          // ✅ EXACTO como lo pediste
           setStatus("Perfecto: 0 parejas repetidas, 0 rivales repetidos", "ok");
         } else {
           const a = gen.audit;
@@ -621,6 +823,53 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       } catch (e) {
         console.error(e);
         setStatus(`❌ ${e?.message || e}`, "error");
+      }
+    });
+
+    $("btnPdfFixture")?.addEventListener("click", async () => {
+      try {
+        const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
+        const detail = await getHistoryDetail(dateISO);
+        if (!detail?.session) throw new Error("No hay equipos guardados para esta fecha (guarda equipos primero).");
+
+        const t = Array.isArray(Store.state?.turns) ? Store.state.turns : [];
+        if (!t.length) throw new Error("Primero genera turnos.");
+
+        makePdf({
+          mode: "fixture",
+          session: detail.session,
+          turns: t,
+          summary: null,
+          dateISO
+        });
+      } catch (e) {
+        console.error(e);
+        setStatus(`❌ PDF fixture: ${e?.message || e}`, "error");
+      }
+    });
+
+    $("btnPdfResults")?.addEventListener("click", async () => {
+      try {
+        const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
+        const detail = await getHistoryDetail(dateISO);
+        if (!detail?.session) throw new Error("No hay equipos guardados para esta fecha (guarda equipos primero).");
+
+        const t = Array.isArray(Store.state?.turns) ? Store.state.turns : [];
+        if (!t.length) throw new Error("Primero genera turnos.");
+        if (!allScoresComplete(t)) throw new Error("Completa todos los marcadores para exportar resultados.");
+
+        const summary = computeSummary(t);
+
+        makePdf({
+          mode: "results",
+          session: detail.session,
+          turns: t,
+          summary,
+          dateISO
+        });
+      } catch (e) {
+        console.error(e);
+        setStatus(`❌ PDF resultados: ${e?.message || e}`, "error");
       }
     });
 
