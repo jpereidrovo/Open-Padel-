@@ -88,6 +88,10 @@
     return playerRanking(p1) + playerRanking(p2);
   }
 
+  function getPairSeedLabel(pair) {
+    return pair?.seedNumber ? `Siembra ${pair.seedNumber}` : "";
+  }
+
   function categoryFormat(size) {
     switch (Number(size)) {
       case 8:
@@ -262,6 +266,10 @@
       throw new Error(`La categoría necesita exactamente ${category.size} parejas.`);
     }
 
+    category.pairs.forEach(p => {
+      p.seedNumber = null;
+    });
+
     const groups = format.groups.map((capacity, idx) => ({
       id: GROUP_NAMES[idx],
       name: `Grupo ${GROUP_NAMES[idx]}`,
@@ -276,11 +284,7 @@
 
     seeded.forEach((pair, idx) => {
       groups[idx].pairIds.push(pair.id);
-    });
-
-    groups.forEach((g, idx) => {
-      const pairId = g.pairIds[0];
-      const sourcePair = category.pairs.find(p => p.id === pairId);
+      const sourcePair = category.pairs.find(p => p.id === pair.id);
       if (sourcePair) sourcePair.seedNumber = idx + 1;
     });
 
@@ -294,8 +298,27 @@
     }
 
     groups.forEach(group => {
+      const sortedGroupPairIds = group.pairIds.slice().sort((aId, bId) => {
+        const aPair = category.pairs.find(p => p.id === aId);
+        const bPair = category.pairs.find(p => p.id === bId);
+
+        const aSeed = Number(aPair?.seedNumber || 9999);
+        const bSeed = Number(bPair?.seedNumber || 9999);
+
+        if (aSeed !== bSeed) return aSeed - bSeed;
+
+        const aRank = pairRanking(aPair, category);
+        const bRank = pairRanking(bPair, category);
+        if (bRank !== aRank) return bRank - aRank;
+
+        return pairLabel(aPair, category).localeCompare(pairLabel(bPair, category), "es", { sensitivity: "base" });
+      });
+
+      group.pairIds = sortedGroupPairIds;
+
       const pairs = group.pairIds.map(id => category.pairs.find(p => p.id === id)).filter(Boolean);
       const matchPairs = combinations(pairs);
+
       group.matches = matchPairs.map(([a, b], idx) => ({
         id: uid("gm"),
         stage: "group",
@@ -1084,7 +1107,10 @@
               <div class="list-row">
                 <div>
                   <div><b>${esc(pairLabel(pair, category))}</b></div>
-                  <div class="hint muted">Ranking pareja: <b>${esc(pair.totalRanking)}</b> ${idx < category.format.groups.length ? `• Siembra #${idx + 1}` : ""}</div>
+                  <div class="hint muted">
+                    Ranking pareja: <b>${esc(pair.totalRanking)}</b>
+                    ${idx < category.format.groups.length ? `• <b>${esc(getPairSeedLabel({ seedNumber: idx + 1 }))}</b>` : ""}
+                  </div>
                 </div>
                 <div class="btns">
                   <button class="ghost small" type="button" data-del-pair="${esc(pair.id)}">Borrar</button>
@@ -1109,7 +1135,13 @@
                   <div class="inline-meta">
                     ${group.pairIds.map((pairId, idx) => {
                       const pair = category.pairs.find(p => p.id === pairId);
-                      return `<span class="chip">P${idx + 1}: ${esc(pairLabel(pair, category))}</span>`;
+                      const seedText = getPairSeedLabel(pair);
+                      return `
+                        <span class="chip">
+                          P${idx + 1}: ${esc(pairLabel(pair, category))}
+                          ${seedText ? `• ${esc(seedText)}` : ""}
+                        </span>
+                      `;
                     }).join("")}
                   </div>
                 </div>
@@ -1131,20 +1163,27 @@
                       </tr>
                     </thead>
                     <tbody>
-                      ${standings.map(row => `
-                        <tr>
-                          <td><b>${esc(row.pairName)}</b></td>
-                          <td>${esc(row.pj)}</td>
-                          <td>${esc(row.pg)}</td>
-                          <td>${esc(row.pp)}</td>
-                          <td>${esc(row.sg)}</td>
-                          <td>${esc(row.sp)}</td>
-                          <td>${esc(row.dgs)}</td>
-                          <td>${esc(row.gg)}</td>
-                          <td>${esc(row.gp)}</td>
-                          <td>${esc(row.dg)}</td>
-                        </tr>
-                      `).join("")}
+                      ${standings.map(row => {
+                        const pair = category.pairs.find(p => p.id === row.pairId);
+                        const seedText = getPairSeedLabel(pair);
+                        return `
+                          <tr>
+                            <td>
+                              <b>${esc(row.pairName)}</b>
+                              ${seedText ? `<div class="hint muted">${esc(seedText)}</div>` : ""}
+                            </td>
+                            <td>${esc(row.pj)}</td>
+                            <td>${esc(row.pg)}</td>
+                            <td>${esc(row.pp)}</td>
+                            <td>${esc(row.sg)}</td>
+                            <td>${esc(row.sp)}</td>
+                            <td>${esc(row.dgs)}</td>
+                            <td>${esc(row.gg)}</td>
+                            <td>${esc(row.gp)}</td>
+                            <td>${esc(row.dg)}</td>
+                          </tr>
+                        `;
+                      }).join("")}
                     </tbody>
                   </table>
                 </div>
