@@ -280,11 +280,8 @@
 
     groups.forEach((g, idx) => {
       const pairId = g.pairIds[0];
-      const pairIndex = sortedPairs.findIndex(p => p.id === pairId);
-      if (pairId && pairIndex >= 0) {
-        const sourcePair = category.pairs.find(p => p.id === pairId);
-        if (sourcePair) sourcePair.seedNumber = idx + 1;
-      }
+      const sourcePair = category.pairs.find(p => p.id === pairId);
+      if (sourcePair) sourcePair.seedNumber = idx + 1;
     });
 
     let cursor = 0;
@@ -321,11 +318,13 @@
     a = Number(a); b = Number(b);
     if (!Number.isInteger(a) || !Number.isInteger(b)) return false;
     if (a === b) return false;
+
     const high = Math.max(a, b);
     const low = Math.min(a, b);
 
     if (high === 6 && low <= 4) return true;
     if (high === 7 && low === 5) return true;
+
     if (high === 7 && low === 6) {
       const tba = Number(tbA);
       const tbb = Number(tbB);
@@ -367,7 +366,6 @@
   function validateAndNormalizeSets(stage, rawSets) {
     const cleaned = rawSets
       .map(s => ({
-        type: s.type,
         a: s.a === "" || s.a == null ? null : Number(s.a),
         b: s.b === "" || s.b == null ? null : Number(s.b),
         tbA: s.tbA === "" || s.tbA == null ? null : Number(s.tbA),
@@ -395,7 +393,7 @@
         if (winner === "A") winsA++;
         else winsB++;
         sets.push({ type: "super", a: set.a, b: set.b, tbA: null, tbB: null });
-        continue;
+        break;
       }
 
       if (!isValidNormalSet(set.a, set.b, set.tbA, set.tbB)) {
@@ -405,6 +403,7 @@
       const winner = set.a > set.b ? "A" : "B";
       if (winner === "A") winsA++;
       else winsB++;
+
       sets.push({
         type: "normal",
         a: set.a,
@@ -418,13 +417,6 @@
 
     if (winsA !== 2 && winsB !== 2) {
       throw new Error("El partido debe terminar con 2 sets ganados por una pareja.");
-    }
-
-    if (!stageIsShort(stage) && cleaned.length >= 3 && winsA === 1 && winsB === 1) {
-      const third = cleaned[2];
-      if (!isValidNormalSet(third.a, third.b, third.tbA, third.tbB)) {
-        throw new Error("En semifinal y final el tercer set debe ser completo.");
-      }
     }
 
     return sets;
@@ -670,7 +662,6 @@
 
     const qualifiers = qualifyFromGroups(category);
     const firstRoundMatches = knockoutTemplate(category, qualifiers);
-
     const rounds = [];
     const start = category.format.knockoutStart;
 
@@ -837,13 +828,9 @@
         const winnerA = srcA?.completed ? srcA.winnerPairId : null;
         const winnerB = srcB?.completed ? srcB.winnerPairId : null;
 
-        const prevA = match.pairAId;
-        const prevB = match.pairBId;
-
-        match.pairAId = winnerA || null;
-        match.pairBId = winnerB || null;
-
-        if ((prevA !== match.pairAId || prevB !== match.pairBId) && !match.completed) {
+        if (!match.completed) {
+          match.pairAId = winnerA || null;
+          match.pairBId = winnerB || null;
           match.sets = [];
           match.winnerPairId = null;
         }
@@ -866,6 +853,7 @@
     const sets = validateAndNormalizeSets(match.stage, rawSets);
     const winsA = sets.filter(s => s.a > s.b).length;
     const winsB = sets.filter(s => s.b > s.a).length;
+
     match.sets = sets;
     match.winnerPairId = winsA > winsB ? match.pairAId : match.pairBId;
     match.completed = true;
@@ -888,13 +876,10 @@
     propagateKnockoutWinners(category);
   }
 
-  function renderPairSelectOptions(category, excludeIds = []) {
-    const used = new Set(
-      category.pairs.flatMap(p => [p.player1Id, p.player2Id])
-    );
-
+  function renderPairSelectOptions(category) {
+    const used = new Set(category.pairs.flatMap(p => [p.player1Id, p.player2Id]));
     return category.players
-      .filter(p => !used.has(p.id) || excludeIds.includes(p.id))
+      .filter(p => !used.has(p.id))
       .sort((a, b) => playerFullName(a).localeCompare(playerFullName(b), "es", { sensitivity: "base" }))
       .map(p => `<option value="${esc(p.id)}">${esc(p.cedula)} • ${esc(playerFullName(p))} • Rk ${esc(p.ranking)}</option>`)
       .join("");
@@ -908,53 +893,54 @@
     return `Grupos: ${groupsText} • Clasifican ${format.qualifyPerGroup} por grupo • ${stageLabel(format.knockoutStart)}`;
   }
 
-  function renderMatchEditor(targetId, match, stageLabelText) {
+  function renderMatchEditorInline(match, stageLabelText, scope, extra = {}) {
+    const saveAttrs = scope === "group"
+      ? `data-save-group-match="${esc(match.id)}" data-group-id="${esc(extra.groupId || "")}"`
+      : `data-save-ko-match="${esc(match.id)}" data-round-index="${esc(extra.roundIndex)}"`;
+
     return `
-      <details class="soft-panel" style="margin-top:8px;" id="${esc(targetId)}">
-        <summary style="cursor:pointer; font-weight:800;">Cargar / editar marcador</summary>
-        <div class="stack" style="margin-top:10px;">
-          <div class="hint muted">${esc(stageLabelText)}</div>
+      <div class="soft-panel" style="margin-top:10px;">
+        <div class="hint muted" style="margin-bottom:10px;">${esc(stageLabelText)}</div>
 
-          <div class="soft-panel">
-            <div class="hint muted" style="margin-bottom:8px;"><b>Set 1</b></div>
-            <div class="match-set-grid">
-              <div><label>Games A</label><input type="number" min="0" max="7" data-set="0" data-field="a" value="${esc(match.sets?.[0]?.a ?? "")}"></div>
-              <div><label>Games B</label><input type="number" min="0" max="7" data-set="0" data-field="b" value="${esc(match.sets?.[0]?.b ?? "")}"></div>
-              <div><label>TB A</label><input type="number" min="0" data-set="0" data-field="tbA" value="${esc(match.sets?.[0]?.tbA ?? "")}"></div>
-              <div><label>TB B</label><input type="number" min="0" data-set="0" data-field="tbB" value="${esc(match.sets?.[0]?.tbB ?? "")}"></div>
-              <div></div><div></div>
-            </div>
-          </div>
-
-          <div class="soft-panel">
-            <div class="hint muted" style="margin-bottom:8px;"><b>Set 2</b></div>
-            <div class="match-set-grid">
-              <div><label>Games A</label><input type="number" min="0" max="7" data-set="1" data-field="a" value="${esc(match.sets?.[1]?.a ?? "")}"></div>
-              <div><label>Games B</label><input type="number" min="0" max="7" data-set="1" data-field="b" value="${esc(match.sets?.[1]?.b ?? "")}"></div>
-              <div><label>TB A</label><input type="number" min="0" data-set="1" data-field="tbA" value="${esc(match.sets?.[1]?.tbA ?? "")}"></div>
-              <div><label>TB B</label><input type="number" min="0" data-set="1" data-field="tbB" value="${esc(match.sets?.[1]?.tbB ?? "")}"></div>
-              <div></div><div></div>
-            </div>
-          </div>
-
-          <div class="soft-panel">
-            <div class="hint muted" style="margin-bottom:8px;">
-              <b>Set 3</b> — en grupos/octavos/cuartos es <b>super tie-break</b> si van 1-1; en semis/final es <b>set completo</b>.
-            </div>
-            <div class="match-set-grid">
-              <div><label>A</label><input type="number" min="0" data-set="2" data-field="a" value="${esc(match.sets?.[2]?.a ?? "")}"></div>
-              <div><label>B</label><input type="number" min="0" data-set="2" data-field="b" value="${esc(match.sets?.[2]?.b ?? "")}"></div>
-              <div><label>TB A</label><input type="number" min="0" data-set="2" data-field="tbA" value="${esc(match.sets?.[2]?.tbA ?? "")}"></div>
-              <div><label>TB B</label><input type="number" min="0" data-set="2" data-field="tbB" value="${esc(match.sets?.[2]?.tbB ?? "")}"></div>
-              <div></div><div></div>
-            </div>
-          </div>
-
-          <div class="btns">
-            <button class="primary" type="button" data-save-match="${esc(match.id)}">Guardar resultado</button>
+        <div class="soft-panel">
+          <div class="hint muted" style="margin-bottom:8px;"><b>Set 1</b></div>
+          <div class="match-set-grid">
+            <div><label>Games A</label><input type="number" min="0" max="7" data-set="0" data-field="a" value="${esc(match.sets?.[0]?.a ?? "")}"></div>
+            <div><label>Games B</label><input type="number" min="0" max="7" data-set="0" data-field="b" value="${esc(match.sets?.[0]?.b ?? "")}"></div>
+            <div><label>TB A</label><input type="number" min="0" data-set="0" data-field="tbA" value="${esc(match.sets?.[0]?.tbA ?? "")}"></div>
+            <div><label>TB B</label><input type="number" min="0" data-set="0" data-field="tbB" value="${esc(match.sets?.[0]?.tbB ?? "")}"></div>
+            <div></div><div></div>
           </div>
         </div>
-      </details>
+
+        <div class="soft-panel" style="margin-top:10px;">
+          <div class="hint muted" style="margin-bottom:8px;"><b>Set 2</b></div>
+          <div class="match-set-grid">
+            <div><label>Games A</label><input type="number" min="0" max="7" data-set="1" data-field="a" value="${esc(match.sets?.[1]?.a ?? "")}"></div>
+            <div><label>Games B</label><input type="number" min="0" max="7" data-set="1" data-field="b" value="${esc(match.sets?.[1]?.b ?? "")}"></div>
+            <div><label>TB A</label><input type="number" min="0" data-set="1" data-field="tbA" value="${esc(match.sets?.[1]?.tbA ?? "")}"></div>
+            <div><label>TB B</label><input type="number" min="0" data-set="1" data-field="tbB" value="${esc(match.sets?.[1]?.tbB ?? "")}"></div>
+            <div></div><div></div>
+          </div>
+        </div>
+
+        <div class="soft-panel" style="margin-top:10px;">
+          <div class="hint muted" style="margin-bottom:8px;">
+            <b>Set 3</b> — grupos/octavos/cuartos: super tie-break si van 1-1. Semis/final: set completo.
+          </div>
+          <div class="match-set-grid">
+            <div><label>A</label><input type="number" min="0" data-set="2" data-field="a" value="${esc(match.sets?.[2]?.a ?? "")}"></div>
+            <div><label>B</label><input type="number" min="0" data-set="2" data-field="b" value="${esc(match.sets?.[2]?.b ?? "")}"></div>
+            <div><label>TB A</label><input type="number" min="0" data-set="2" data-field="tbA" value="${esc(match.sets?.[2]?.tbA ?? "")}"></div>
+            <div><label>TB B</label><input type="number" min="0" data-set="2" data-field="tbB" value="${esc(match.sets?.[2]?.tbB ?? "")}"></div>
+            <div></div><div></div>
+          </div>
+        </div>
+
+        <div class="btns" style="margin-top:12px;">
+          <button class="primary" type="button" ${saveAttrs}>Guardar resultado</button>
+        </div>
+      </div>
     `;
   }
 
@@ -1179,7 +1165,7 @@
                         </div>
                       </div>
 
-                      ${renderMatchEditor(`gm_${match.id}`, match, `${group.name} • Partido ${match.order}`)}
+                      ${renderMatchEditorInline(match, `${group.name} • Partido ${match.order}`, "group", { groupId: group.id })}
                     </div>
                   `).join("")}
                 </div>
@@ -1217,7 +1203,7 @@
                 </div>
 
                 ${match.pairAId && match.pairBId
-                  ? renderMatchEditor(`ko_${match.id}`, match, round.title)
+                  ? renderMatchEditorInline(match, round.title, "ko", { roundIndex })
                   : `<div class="hint muted" style="margin-top:10px;">Esperando resultados previos.</div>`}
               </div>
             `).join("")}
@@ -1686,13 +1672,14 @@
       }
     });
 
-    document.querySelectorAll("[data-save-match]").forEach(btn => {
+    document.querySelectorAll("[data-save-group-match]").forEach(btn => {
       btn.addEventListener("click", () => {
-        const matchId = btn.getAttribute("data-save-match");
-        const details = btn.closest("details");
-        if (!details) return;
+        const matchId = btn.getAttribute("data-save-group-match");
+        const groupId = btn.getAttribute("data-group-id");
+        const container = btn.closest(".soft-panel");
+        if (!container) return;
 
-        const inputs = details.querySelectorAll("input[data-set]");
+        const inputs = container.querySelectorAll("input[data-set]");
         const rawSets = [{}, {}, {}];
         inputs.forEach(inp => {
           const idx = Number(inp.getAttribute("data-set"));
@@ -1704,22 +1691,36 @@
           updateTournament(getState(), tournament.id, (tor) => {
             const cat = findCategory(tor, UI.selectedBranch, category.id);
             if (!cat) throw new Error("Categoría no encontrada.");
-
-            const group = cat.groups.find(g => g.matches.some(m => m.id === matchId));
-            if (group) {
-              saveGroupMatch(cat, group.id, matchId, rawSets);
-              return;
-            }
-
-            const roundIndex = cat.knockout.rounds.findIndex(r => r.matches.some(m => m.id === matchId));
-            if (roundIndex >= 0) {
-              saveKnockoutMatch(cat, roundIndex, matchId, rawSets);
-              return;
-            }
-
-            throw new Error("No se encontró el partido.");
+            saveGroupMatch(cat, groupId, matchId, rawSets);
           });
+          render();
+        } catch (e) {
+          alert(e?.message || e);
+        }
+      });
+    });
 
+    document.querySelectorAll("[data-save-ko-match]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const matchId = btn.getAttribute("data-save-ko-match");
+        const roundIndex = Number(btn.getAttribute("data-round-index"));
+        const container = btn.closest(".soft-panel");
+        if (!container) return;
+
+        const inputs = container.querySelectorAll("input[data-set]");
+        const rawSets = [{}, {}, {}];
+        inputs.forEach(inp => {
+          const idx = Number(inp.getAttribute("data-set"));
+          const field = inp.getAttribute("data-field");
+          rawSets[idx][field] = inp.value;
+        });
+
+        try {
+          updateTournament(getState(), tournament.id, (tor) => {
+            const cat = findCategory(tor, UI.selectedBranch, category.id);
+            if (!cat) throw new Error("Categoría no encontrada.");
+            saveKnockoutMatch(cat, roundIndex, matchId, rawSets);
+          });
           render();
         } catch (e) {
           alert(e?.message || e);
