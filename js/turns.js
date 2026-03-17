@@ -1,7 +1,7 @@
 // turns.js — Generar turnos + auditoría + PDF fixture/resultados + guardar historial
-// ✅ Robusto con supabaseApi viejo o nuevo
-// ✅ PDF fixture antes de guardar resultados
-// ✅ PDF resultados después de llenar marcadores
+// ✅ Parejas internas sin repetir cuando es posible
+// ✅ Rivales repetidos minimizados por asignación óptima de canchas
+// ✅ Mantiene PDF fixture, PDF resultados y guardar
 // ✅ No toca auth
 
 import { Store } from "./store.js";
@@ -87,6 +87,17 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     return { totalA, totalB, perTurn };
   }
 
+  async function ensureTeamsLoaded(dateISO) {
+    const A = Store.state?.team_a || [];
+    const B = Store.state?.team_b || [];
+    if (A.length && B.length) return { A, B };
+
+    const detail = await apiGetHistoryDetail(dateISO);
+    const session = detail?.session;
+    if (!session) throw new Error("No hay equipos guardados en esta fecha. Ve a Equipos y guarda primero.");
+    return { A: session.team_a || [], B: session.team_b || [] };
+  }
+
   function pName(p) {
     return String(p?.name || "").trim() || String(p?.id || "");
   }
@@ -143,7 +154,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
             }
             const obj = oppOcc.get(ok);
             obj.count += 1;
-            if (obj.samples.length < 6) obj.samples.push({ turn: t.turnIndex, court: m.court });
+            if (obj.samples.length < 8) obj.samples.push({ turn: t.turnIndex, court: m.court });
           }
         }
       }
@@ -151,6 +162,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
     const repeatedPairsA = [];
     const repeatedPairsB = [];
+    const repeatedOpponents = [];
 
     for (const [k, occ] of pairOccA.entries()) {
       if (occ.length > 1) repeatedPairsA.push({ key: k, count: occ.length, occ });
@@ -158,16 +170,12 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     for (const [k, occ] of pairOccB.entries()) {
       if (occ.length > 1) repeatedPairsB.push({ key: k, count: occ.length, occ });
     }
-
-    const repeatedOpponents = [];
     for (const [, obj] of oppOcc.entries()) {
       if (obj.count > 1) {
-        const aName = oppNames.get(obj.aId) || obj.aId;
-        const bName = oppNames.get(obj.bId) || obj.bId;
         repeatedOpponents.push({
           count: obj.count,
-          aName,
-          bName,
+          aName: oppNames.get(obj.aId) || obj.aId,
+          bName: oppNames.get(obj.bId) || obj.bId,
           samples: obj.samples
         });
       }
@@ -256,7 +264,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
         <div class="card" style="background: rgba(0,0,0,.12); margin-top:12px;">
           <h4 style="margin:0 0 8px;">Rivales repetidos (Jugador vs Jugador)</h4>
-          <div class="hint muted">Si ves “3 veces”, esos dos jugadores se enfrentaron 3 veces en todos los turnos.</div>
           <div style="margin-top:8px;">
             ${listOpp(audit.repeatedOpponents)}
           </div>
@@ -281,124 +288,200 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     };
   }
 
-  function generateCandidate(teamA, teamB, numTurns) {
-    const { D: AD0, R: AR0 } = splitBySide(teamA);
-    const { D: BD0, R: BR0 } = splitBySide(teamB);
+  function getCourts(teamA, teamB) {
+    const A = splitBySide(teamA);
+    const B = splitBySide(teamB);
+    return Math.min(A.D.length, A.R.length, B.D.length, B.R.length);
+  }
 
-    const courts = Math.min(AD0.length, AR0.length, BD0.length, BR0.length);
-    if (courts <= 0) throw new Error("Equipos incompletos para armar parejas (faltan D o R).");
+  function buildTeamPairingsNoRepeat(teamPlayers, numTurns) {
+    const { D, R } = splitBySide(teamPlayers);
+    const k = Math.min(D.length, R.length);
+    if (k <= 0) throw new Error("Equipo incompleto para armar parejas.");
 
-    const AD = shuffleCopy(AD0).slice(0, courts);
-    const AR = shuffleCopy(AR0).slice(0, courts);
-    const BD = shuffleCopy(BD0).slice(0, courts);
-    const BR = shuffleCopy(BR0).slice(0, courts);
+    const Dsel = shuffleCopy(D).slice(0, k);
+    const Rsel = shuffleCopy(R).slice(0, k);
 
+    const pairingsByTurn = [];
+
+    // Si numTurns <= k, rotación garantiza 0 repeticiones
+    // Si numTurns > k, empezará a repetir a partir de k
+    for (let t = 0; t < numTurns; t++) {
+      const shift = t % k;
+      const pairs = [];
+      for (let i = 0; i < k; i++) {
+        pairs.push([Dsel[i], Rsel[(i + shift) % k]]);
+      }
+      pairingsByTurn.push(pairs);
+    }
+
+    return { k, pairingsByTurn };
+  }
+
+  function getIncrementalOpponentPenalty(aPair, bPair, oppCountMap) {
+    const aIds = [String(aPair[0].id), String(aPair[1].id)];
+    const bIds = [String(bPair[0].id), String(bPair[1].id)];
+
+    let penalty = 0;
+
+    for (const ai of aIds) {
+      for (const bi of bIds) {
+        const key = oppKey(ai, bi);
+        const prev = oppCountMap.get(key) || 0;
+
+        // 0 -> 1 = ideal
+        // 1 -> 2 = penaliza
+        // 2 -> 3 = penaliza mucho más
+        if (prev === 0) penalty += 0;
+        else if (prev === 1) penalty += 10;
+        else penalty += 100 + prev * 50;
+      }
+    }
+
+    return penalty;
+  }
+
+  function addOpponentsToMap(aPair, bPair, oppCountMap) {
+    const aIds = [String(aPair[0].id), String(aPair[1].id)];
+    const bIds = [String(bPair[0].id), String(bPair[1].id)];
+
+    for (const ai of aIds) {
+      for (const bi of bIds) {
+        const key = oppKey(ai, bi);
+        oppCountMap.set(key, (oppCountMap.get(key) || 0) + 1);
+      }
+    }
+  }
+
+  function permutations(arr) {
+    if (arr.length <= 1) return [arr.slice()];
+    const out = [];
+    for (let i = 0; i < arr.length; i++) {
+      const head = arr[i];
+      const rest = arr.slice(0, i).concat(arr.slice(i + 1));
+      for (const p of permutations(rest)) {
+        out.push([head, ...p]);
+      }
+    }
+    return out;
+  }
+
+  function bestMatchupForTurn(aPairs, bPairs, oppCountMap) {
+    const idx = bPairs.map((_, i) => i);
+    const perms = permutations(idx);
+
+    let best = null;
+    let bestPenalty = Infinity;
+
+    for (const perm of perms) {
+      let penalty = 0;
+      for (let i = 0; i < aPairs.length; i++) {
+        penalty += getIncrementalOpponentPenalty(aPairs[i], bPairs[perm[i]], oppCountMap);
+      }
+      if (penalty < bestPenalty) {
+        bestPenalty = penalty;
+        best = perm;
+        if (penalty === 0) break;
+      }
+    }
+
+    return { perm: best, penalty: bestPenalty };
+  }
+
+  function buildTurnsFromPairings(aByTurn, bByTurn) {
+    const oppCountMap = new Map();
     const turns = [];
 
-    for (let t = 1; t <= numTurns; t++) {
-      const aShift = Math.floor(Math.random() * courts);
-      const bShift = Math.floor(Math.random() * courts);
-      const mShift = Math.floor(Math.random() * courts);
+    for (let t = 0; t < aByTurn.length; t++) {
+      const aPairs = aByTurn[t];
+      const bPairs = bByTurn[t];
 
-      const Apairs = [];
-      const Bpairs = [];
-
-      for (let i = 0; i < courts; i++) {
-        Apairs.push([AD[i], AR[(i + aShift + t) % courts]]);
-        Bpairs.push([BD[i], BR[(i + bShift + t) % courts]]);
-      }
-
+      const { perm } = bestMatchupForTurn(aPairs, bPairs, oppCountMap);
       const matches = [];
-      for (let i = 0; i < courts; i++) {
-        const bp = Bpairs[(i + mShift) % courts];
+
+      for (let i = 0; i < aPairs.length; i++) {
+        const bp = bPairs[perm[i]];
         matches.push({
           court: i + 1,
-          top: { team: "A", pair: Apairs[i] },
+          top: { team: "A", pair: aPairs[i] },
           bottom: { team: "B", pair: bp },
           scoreRaw: ""
         });
+        addOpponentsToMap(aPairs[i], bp, oppCountMap);
       }
 
-      turns.push({ turnIndex: t, matches });
+      turns.push({ turnIndex: t + 1, matches });
     }
 
-    return { courts, turns };
+    return turns;
   }
 
   function scoreCandidate(turns) {
     const a = auditTurns(turns);
-    const pairsPenalty = a.pairRepeatCount * 100000;
-    const oppPenalty = a.oppRepeatCount * 2000;
-    const oppMaxPenalty = Math.max(0, a.oppMax - 2) * 5000;
+    const pairsPenalty = a.pairRepeatCount * 1000000;
+    const oppPenalty = a.oppRepeatCount * 3000;
+    const oppMaxPenalty = Math.max(0, a.oppMax - 1) * 10000;
     return pairsPenalty + oppPenalty + oppMaxPenalty;
   }
 
-  function generateTurnsSmart(teamA, teamB, numTurns, tries = 8000) {
-    let best = null;
-    let bestScore = Infinity;
+  function generateTurnsSmart(teamA, teamB, numTurns, tries = 2000) {
+    const courts = getCourts(teamA, teamB);
+    if (courts <= 0) throw new Error("Equipos incompletos para armar parejas.");
+
+    let bestTurns = null;
     let bestAudit = null;
+    let bestScore = Infinity;
 
     for (let i = 0; i < tries; i++) {
-      const cand = generateCandidate(teamA, teamB, numTurns);
-      const a = auditTurns(cand.turns);
+      const A = buildTeamPairingsNoRepeat(teamA, numTurns);
+      const B = buildTeamPairingsNoRepeat(teamB, numTurns);
 
-      if (a.okPairs && a.okOpp) {
+      const turns = buildTurnsFromPairings(A.pairingsByTurn, B.pairingsByTurn);
+      const audit = auditTurns(turns);
+      const score = scoreCandidate(turns);
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestTurns = turns;
+        bestAudit = audit;
+      }
+
+      if (audit.okPairs && audit.okOpp) {
         return {
-          courts: cand.courts,
-          turns: cand.turns,
-          audit: a,
+          courts,
+          turns,
+          audit,
           perfect: true,
           triesUsed: i + 1
         };
       }
-
-      const s = scoreCandidate(cand.turns);
-      if (s < bestScore) {
-        bestScore = s;
-        best = cand;
-        bestAudit = a;
-      }
     }
 
-    if (!best) throw new Error("No se pudo generar turnos. Revisa D/R y equipos.");
-
     return {
-      courts: best.courts,
-      turns: best.turns,
-      audit: bestAudit || auditTurns(best.turns),
-      perfect: false,
+      courts,
+      turns: bestTurns,
+      audit: bestAudit,
+      perfect: !!(bestAudit?.okPairs && bestAudit?.okOpp),
       triesUsed: tries
     };
   }
 
-  // ---------- API wrappers robustos ----------
   async function apiGetHistoryDetail(dateISO) {
     const sessionNo = Number(Store.state?.session_no || 1);
-
-    try {
-      if (typeof getHistoryDetail === "function" && getHistoryDetail.length >= 2) {
-        return await getHistoryDetail(dateISO, sessionNo);
-      }
-      return await getHistoryDetail(dateISO);
-    } catch (e) {
-      throw e;
+    if (typeof getHistoryDetail === "function" && getHistoryDetail.length >= 2) {
+      return await getHistoryDetail(dateISO, sessionNo);
     }
+    return await getHistoryDetail(dateISO);
   }
 
   async function apiSaveResults(dateISO, turnsPayload, scoresPayload, summaryPayload) {
     const sessionNo = Number(Store.state?.session_no || 1);
-
-    try {
-      if (typeof saveResultsToHistory === "function" && saveResultsToHistory.length >= 5) {
-        return await saveResultsToHistory(dateISO, sessionNo, turnsPayload, scoresPayload, summaryPayload);
-      }
-      return await saveResultsToHistory(dateISO, turnsPayload, scoresPayload, summaryPayload);
-    } catch (e) {
-      throw e;
+    if (typeof saveResultsToHistory === "function" && saveResultsToHistory.length >= 5) {
+      return await saveResultsToHistory(dateISO, sessionNo, turnsPayload, scoresPayload, summaryPayload);
     }
+    return await saveResultsToHistory(dateISO, turnsPayload, scoresPayload, summaryPayload);
   }
 
-  // ---------- session source robusto ----------
   function getSessionForPdfFromStore(dateISO) {
     const A = Array.isArray(Store.state?.team_a) ? Store.state.team_a : [];
     const B = Array.isArray(Store.state?.team_b) ? Store.state.team_b : [];
@@ -420,7 +503,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     return detail?.session || null;
   }
 
-  // ---------- PDF ----------
   function getJsPDF() {
     const jspdf = window.jspdf;
     if (!jspdf || !jspdf.jsPDF) {
@@ -655,7 +737,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
             <div>
               <label>Turnos</label>
               <select id="turnCount">
-                ${[1,2,3,4].map(n => `<option value="${n}" ${n===3?"selected":""}>${n}</option>`).join("")}
+                ${[1,2,3,4].map(n => `<option value="${n}" ${n===3 ? "selected" : ""}>${n}</option>`).join("")}
               </select>
             </div>
 
@@ -841,13 +923,13 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
     $("btnGenTurns")?.addEventListener("click", async () => {
       try {
-        setStatus("Generando turnos (buscando perfecto)…", "muted");
+        setStatus("Generando turnos (sin repetir parejas y minimizando rivales)…", "muted");
 
         const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
         const numTurns = Number($("turnCount")?.value || 3);
 
         const { A, B } = await ensureTeamsLoaded(dateISO);
-        const gen = generateTurnsSmart(A, B, numTurns, 8000);
+        const gen = generateTurnsSmart(A, B, numTurns, 2000);
 
         Store.setState({
           session_date: dateISO,
@@ -860,7 +942,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         } else {
           const a = gen.audit;
           setStatus(
-            `⚠️ No se encontró perfecto en ${gen.triesUsed} intentos. Generé la mejor combinación posible (parejas rep: ${a.pairRepeatCount}, rivales rep: ${a.oppRepeatCount}, max rival: ${a.oppMax}x). Mira auditoría abajo.`,
+            `⚠️ Mejor combinación encontrada: parejas rep ${a.pairRepeatCount}, rivales rep ${a.oppRepeatCount}, máximo rival ${a.oppMax}x. Revisa auditoría abajo.`,
             "error"
           );
         }
@@ -876,7 +958,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
       try {
         const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
         const session = await getSessionForPdf(dateISO);
-        if (!session) throw new Error("No hay equipos disponibles para el fixture. Ve a Equipos y arma/guarda equipos primero.");
+        if (!session) throw new Error("No hay equipos disponibles para el fixture.");
 
         const t = Array.isArray(Store.state?.turns) ? Store.state.turns : [];
         if (!t.length) throw new Error("Primero genera turnos.");
