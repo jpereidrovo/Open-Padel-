@@ -1,5 +1,5 @@
 // app.js — Open Padel bootstrap
-// OBJETIVO: Auth SIEMPRE funciona aunque fallen módulos (db/teams/turns/history)
+// AUTH blindado + módulos seguros
 
 import { supabase } from "./supabaseClient.js";
 import { Store } from "./store.js";
@@ -12,7 +12,10 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     const el = $(id);
     if (el) el.textContent = text;
   }
-  function show(el, yes) { if (el) el.style.display = yes ? "" : "none"; }
+
+  function show(el, yes) {
+    if (el) el.style.display = yes ? "" : "none";
+  }
 
   function setDot(state) {
     const dot = $("authDot");
@@ -21,6 +24,7 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     if (state === "ok") dot.classList.add("ok");
     if (state === "bad") dot.classList.add("bad");
   }
+
   function setSpinner(on) {
     const sp = $("authSpinner");
     if (!sp) return;
@@ -54,7 +58,34 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     }
   }
 
-  // ✅ AUTH blindado: funciones globales (botones siempre sirven)
+  function updateSidebarMeta() {
+    const tagBase = $("tagBase");
+    const tagTeams = $("tagTeams");
+    const tagTournaments = $("tagTournaments");
+    const pillInfo = $("pillInfo");
+
+    if (tagBase) tagBase.textContent = String((Store.players || []).length);
+
+    const poolCount = Array.isArray(Store.state?.pool) ? Store.state.pool.length : 0;
+    const courts = Number(Store.state?.courts || 0);
+
+    if (tagTeams) {
+      const totalTeamsPlayers =
+        (Array.isArray(Store.state?.team_a) ? Store.state.team_a.length : 0) +
+        (Array.isArray(Store.state?.team_b) ? Store.state.team_b.length : 0);
+      tagTeams.textContent = String(totalTeamsPlayers);
+    }
+
+    try {
+      const rows = JSON.parse(localStorage.getItem("openpadel_tournaments_v1") || "[]");
+      if (tagTournaments) tagTournaments.textContent = String(Array.isArray(rows) ? rows.length : 0);
+    } catch {
+      if (tagTournaments) tagTournaments.textContent = "0";
+    }
+
+    if (pillInfo) pillInfo.textContent = `N: ${poolCount} • Canchas: ${courts}`;
+  }
+
   window.OP_LOGIN = async () => {
     try {
       setSpinner(true);
@@ -104,9 +135,8 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     }
   };
 
-  // ---- Nav ----
   function setActiveNav(activeId) {
-    ["navBase", "navTeams", "navTurns", "navHistory"].forEach((id) => {
+    ["navBase", "navTeams", "navTurns", "navHistory", "navTournaments"].forEach((id) => {
       const btn = $(id);
       if (!btn) return;
       btn.classList.toggle("active", id === activeId);
@@ -118,11 +148,14 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     show($("viewTeams"), view === "teams");
     show($("viewTurns"), view === "turns");
     show($("viewHistory"), view === "history");
+    show($("viewTournaments"), view === "tournaments");
 
     setActiveNav(
       view === "base" ? "navBase" :
       view === "teams" ? "navTeams" :
-      view === "turns" ? "navTurns" : "navHistory"
+      view === "turns" ? "navTurns" :
+      view === "history" ? "navHistory" :
+      "navTournaments"
     );
 
     window.OP = window.OP || {};
@@ -134,10 +167,10 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
     $("navTeams")?.addEventListener("click", () => showView("teams"));
     $("navTurns")?.addEventListener("click", () => showView("turns"));
     $("navHistory")?.addEventListener("click", () => showView("history"));
+    $("navTournaments")?.addEventListener("click", () => showView("tournaments"));
     showView("base");
   }
 
-  // ✅ exchange PKCE solo si hay ?code=
   async function exchangeCodeIfPresent() {
     const url = new URL(window.location.href);
     const code = url.searchParams.get("code");
@@ -181,6 +214,7 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
         setDot("bad");
         setText("authStatusText", "Inicia sesión para usar la app.");
         setText("authStatus", "No conectado");
+        updateSidebarMeta();
         return;
       }
 
@@ -193,7 +227,6 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
       setText("authStatusText", `✅ Conectado: ${user.email || user.id}`);
       setText("authStatus", "Conectado ✅");
 
-      // carga players solo si cambió usuario o aún no está listo
       if (!Store.ready || lastUserId !== user.id) {
         lastUserId = user.id;
         const players = await listPlayers();
@@ -201,6 +234,8 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
         Store.setReady();
         window.dispatchEvent(new Event("op:storeReady"));
       }
+
+      updateSidebarMeta();
     } catch (e) {
       console.error("❌ refreshSessionUI", e);
       setSpinner(false);
@@ -214,10 +249,10 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
 
       if (loginBtn) loginBtn.disabled = false;
       if (logoutBtn) logoutBtn.disabled = true;
+      updateSidebarMeta();
     }
   }
 
-  // ✅ IMPORTS SEGUROS: si un módulo falla, NO tumba el login
   async function safeImport(path) {
     try { await import(path); }
     catch (e) { console.error("❌ import failed:", path, e); }
@@ -228,6 +263,10 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
       if (document.visibilityState === "visible") refreshSessionUI("tab visible").catch(console.error);
     });
     window.addEventListener("focus", () => refreshSessionUI("focus").catch(console.error));
+    window.addEventListener("op:playersChanged", updateSidebarMeta);
+    window.addEventListener("op:stateChanged", updateSidebarMeta);
+    window.addEventListener("op:storeReady", updateSidebarMeta);
+    window.addEventListener("op:tournamentsChanged", updateSidebarMeta);
   }
 
   let started = false;
@@ -248,18 +287,18 @@ import { signInWithGoogle, signOut, getSessionUser, listPlayers } from "./supaba
       setText("authStatus", e?.message || String(e));
     }
 
-    // Módulos (no pueden romper auth)
     await safeImport("./db.js");
     await safeImport("./teams.js");
     await safeImport("./turns.js");
     await safeImport("./history.js");
+    await safeImport("./tournaments.js");
 
-    // cambios reales de sesión
     supabase.auth.onAuthStateChange((event) => {
       refreshSessionUI(`auth:${event}`).catch(console.error);
     });
 
     await refreshSessionUI("init");
+    updateSidebarMeta();
     console.log("✅ app.js listo (auth blindado)");
   }
 
