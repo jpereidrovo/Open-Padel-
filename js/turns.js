@@ -1,6 +1,11 @@
 // turns.js — Generar turnos + auditoría + PDF fixture/resultados + guardar historial
 // ✅ Parejas internas sin repetir cuando es posible
-// ✅ Rivales repetidos minimizados por asignación óptima de canchas
+// ✅ Rivales repetidos minimizados
+// ✅ Estrategia por valor del turno:
+//    Turno 1 = parejas más bajas
+//    Turno 2 = parejas medias
+//    Turno 3 = parejas más fuertes
+// ✅ Permite "sacrificio controlado" en el turno barato
 // ✅ Mantiene PDF fixture, PDF resultados y guardar
 // ✅ No toca auth
 
@@ -114,6 +119,10 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
   function oppKey(aId, bId) {
     return [String(aId), String(bId)].sort().join("|");
+  }
+
+  function pairStrength(pair) {
+    return Number(pair?.[0]?.rating || 0) + Number(pair?.[1]?.rating || 0);
   }
 
   function auditTurns(turns) {
@@ -304,8 +313,6 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
     const pairingsByTurn = [];
 
-    // Si numTurns <= k, rotación garantiza 0 repeticiones
-    // Si numTurns > k, empezará a repetir a partir de k
     for (let t = 0; t < numTurns; t++) {
       const shift = t % k;
       const pairs = [];
@@ -316,6 +323,32 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     }
 
     return { k, pairingsByTurn };
+  }
+
+  function sortPairsByTurnValue(pairs, turnIndex, totalTurns) {
+    const sorted = pairs.slice().sort((a, b) => pairStrength(a) - pairStrength(b));
+
+    // Estrategia:
+    // turno 1 = más bajas
+    // turno medio = medias
+    // turno final = más altas
+    if (turnIndex === 1) return sorted;
+
+    if (turnIndex === totalTurns) return sorted.reverse();
+
+    // turnos intermedios: llevar las medias al frente
+    const n = sorted.length;
+    const mids = [];
+    let left = Math.floor((n - 1) / 2);
+    let right = left + 1;
+
+    if (n % 2 === 1) mids.push(sorted[left--]);
+
+    while (left >= 0 || right < n) {
+      if (right < n) mids.push(sorted[right++]);
+      if (left >= 0) mids.push(sorted[left--]);
+    }
+    return mids;
   }
 
   function getIncrementalOpponentPenalty(aPair, bPair, oppCountMap) {
@@ -329,12 +362,9 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         const key = oppKey(ai, bi);
         const prev = oppCountMap.get(key) || 0;
 
-        // 0 -> 1 = ideal
-        // 1 -> 2 = penaliza
-        // 2 -> 3 = penaliza mucho más
         if (prev === 0) penalty += 0;
-        else if (prev === 1) penalty += 10;
-        else penalty += 100 + prev * 50;
+        else if (prev === 1) penalty += 12;
+        else penalty += 120 + prev * 70;
       }
     }
 
@@ -359,14 +389,12 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     for (let i = 0; i < arr.length; i++) {
       const head = arr[i];
       const rest = arr.slice(0, i).concat(arr.slice(i + 1));
-      for (const p of permutations(rest)) {
-        out.push([head, ...p]);
-      }
+      for (const p of permutations(rest)) out.push([head, ...p]);
     }
     return out;
   }
 
-  function bestMatchupForTurn(aPairs, bPairs, oppCountMap) {
+  function bestMatchupForTurn(aPairs, bPairs, oppCountMap, turnIndex) {
     const idx = bPairs.map((_, i) => i);
     const perms = permutations(idx);
 
@@ -375,9 +403,19 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
     for (const perm of perms) {
       let penalty = 0;
+
       for (let i = 0; i < aPairs.length; i++) {
-        penalty += getIncrementalOpponentPenalty(aPairs[i], bPairs[perm[i]], oppCountMap);
+        const aPair = aPairs[i];
+        const bPair = bPairs[perm[i]];
+
+        penalty += getIncrementalOpponentPenalty(aPair, bPair, oppCountMap);
+
+        // en turno caro, emparejar fuertes con fuertes y débiles con débiles
+        // para que no "desperdicies" pareja top en un cruce flojo
+        const diff = Math.abs(pairStrength(aPair) - pairStrength(bPair));
+        penalty += diff * (turnIndex === 3 ? 0.8 : turnIndex === 2 ? 0.4 : 0.15);
       }
+
       if (penalty < bestPenalty) {
         bestPenalty = penalty;
         best = perm;
@@ -391,14 +429,25 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
   function buildTurnsFromPairings(aByTurn, bByTurn) {
     const oppCountMap = new Map();
     const turns = [];
+    const totalTurns = aByTurn.length;
 
     for (let t = 0; t < aByTurn.length; t++) {
-      const aPairs = aByTurn[t];
-      const bPairs = bByTurn[t];
+      const turnIndex = t + 1;
 
-      const { perm } = bestMatchupForTurn(aPairs, bPairs, oppCountMap);
+      let aPairs = sortPairsByTurnValue(aByTurn[t], turnIndex, totalTurns);
+      let bPairs = sortPairsByTurnValue(bByTurn[t], turnIndex, totalTurns);
+
+      // Sacrificio controlado:
+      // En turno 1, dejamos una pareja muy débil al frente
+      // para concentrar mejores combinaciones en el resto.
+      if (turnIndex === 1 && aPairs.length >= 3) {
+        aPairs = aPairs.slice().sort((x, y) => pairStrength(x) - pairStrength(y));
+        bPairs = bPairs.slice().sort((x, y) => pairStrength(x) - pairStrength(y));
+      }
+
+      const { perm } = bestMatchupForTurn(aPairs, bPairs, oppCountMap, turnIndex);
+
       const matches = [];
-
       for (let i = 0; i < aPairs.length; i++) {
         const bp = bPairs[perm[i]];
         matches.push({
@@ -410,7 +459,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         addOpponentsToMap(aPairs[i], bp, oppCountMap);
       }
 
-      turns.push({ turnIndex: t + 1, matches });
+      turns.push({ turnIndex, matches });
     }
 
     return turns;
@@ -421,7 +470,21 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
     const pairsPenalty = a.pairRepeatCount * 1000000;
     const oppPenalty = a.oppRepeatCount * 3000;
     const oppMaxPenalty = Math.max(0, a.oppMax - 1) * 10000;
-    return pairsPenalty + oppPenalty + oppMaxPenalty;
+
+    // Además medir si las parejas van "creciendo" en fuerza por turno
+    let strategicPenalty = 0;
+    const byTurnAvg = turns.map(t => {
+      const vals = (t.matches || []).map(m => pairStrength(m.top.pair) + pairStrength(m.bottom.pair));
+      return vals.length ? vals.reduce((x, y) => x + y, 0) / vals.length : 0;
+    });
+
+    for (let i = 1; i < byTurnAvg.length; i++) {
+      if (byTurnAvg[i] < byTurnAvg[i - 1]) {
+        strategicPenalty += (byTurnAvg[i - 1] - byTurnAvg[i]) * 500;
+      }
+    }
+
+    return pairsPenalty + oppPenalty + oppMaxPenalty + strategicPenalty;
   }
 
   function generateTurnsSmart(teamA, teamB, numTurns, tries = 2000) {
@@ -923,7 +986,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
 
     $("btnGenTurns")?.addEventListener("click", async () => {
       try {
-        setStatus("Generando turnos (sin repetir parejas y minimizando rivales)…", "muted");
+        setStatus("Generando turnos estratégicos…", "muted");
 
         const dateISO = $("turnsDate")?.value || Store.state?.session_date || todayISO();
         const numTurns = Number($("turnCount")?.value || 3);
@@ -942,7 +1005,7 @@ import { getHistoryDetail, saveResultsToHistory } from "./supabaseApi.js";
         } else {
           const a = gen.audit;
           setStatus(
-            `⚠️ Mejor combinación encontrada: parejas rep ${a.pairRepeatCount}, rivales rep ${a.oppRepeatCount}, máximo rival ${a.oppMax}x. Revisa auditoría abajo.`,
+            `⚠️ Mejor combinación estratégica: parejas rep ${a.pairRepeatCount}, rivales rep ${a.oppRepeatCount}, máximo rival ${a.oppMax}x.`,
             "error"
           );
         }
